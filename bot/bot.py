@@ -45,12 +45,15 @@ scheduler.start()
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
-    # Create tables if they don't exist
     async with aiosqlite.connect('file_uploads.db') as db:
         await db.execute('''CREATE TABLE IF NOT EXISTS user_uploads
                             (user_id INTEGER PRIMARY KEY, username TEXT, uploads INTEGER, last_reset TEXT)''')
-        await db.execute('''CREATE TABLE IF NOT EXISTS settings
+        await db.execute('''CREATE TABLE IF NOT EXISTS channel_settings
                             (channel_id INTEGER PRIMARY KEY, role_name TEXT, max_uploads INTEGER)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS role_hierarchy
+                            (role_name TEXT PRIMARY KEY, level INTEGER)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS global_settings
+                            (id INTEGER PRIMARY KEY CHECK (id = 1), default_max_uploads INTEGER)''')
         await db.commit()
 
 @bot.event
@@ -58,31 +61,42 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Check if message has attachments
     if message.attachments:
         channel_id = message.channel.id
         user_id = message.author.id
         username = message.author.name
 
         async with aiosqlite.connect('file_uploads.db') as db:
-            # Get channel settings
-            async with db.execute("SELECT role_name, max_uploads FROM settings WHERE channel_id = ?", (channel_id,)) as cursor:
+            async with db.execute("SELECT role_name, max_uploads FROM channel_settings WHERE channel_id = ?", (channel_id,)) as cursor:
                 channel_settings = await cursor.fetchone()
 
             if not channel_settings:
-                return  # Channel not configured
+                async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
+                    global_settings = await cursor.fetchone()
+                if global_settings:
+                    max_uploads = global_settings[0]
+                    required_role_name = None  # No specific role required for global limit
+                else:
+                    return  # No global setting, allow unlimited uploads
 
-            required_role_name, max_uploads = channel_settings
+            else:
+                required_role_name, max_uploads = channel_settings
 
-            # Check user's role
-            user_roles = [role.name for role in message.author.roles]
-            if required_role_name not in user_roles:
-                await message.delete()
-                try:
-                    await message.author.send(f"You don't have the required role ({required_role_name}) to upload files in that channel.")
-                except discord.errors.Forbidden:
-                    print(f"Unable to send DM to user {message.author.name}")
-                return
+            if required_role_name:
+                user_roles = [role.name for role in message.author.roles]
+                async with db.execute("SELECT MAX(level) FROM role_hierarchy WHERE role_name IN ({})".format(','.join('?' * len(user_roles))), user_roles) as cursor:
+                    user_highest_level = await cursor.fetchone()
+
+                async with db.execute("SELECT level FROM role_hierarchy WHERE role_name = ?", (required_role_name,)) as cursor:
+                    required_level = await cursor.fetchone()
+
+                if not user_highest_level or not required_level or user_highest_level[0] < required_level[0]:
+                    await message.delete()
+                    try:
+                        await message.author.send(f"You don't have the required role level to upload files in that channel.")
+                    except discord.errors.Forbidden:
+                        print(f"Unable to send DM to user {message.author.name}")
+                    return
 
             # Check user's upload count
             async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
@@ -100,7 +114,7 @@ async def on_message(message):
 
             if new_upload_count > max_uploads:
                 await message.delete()
-                if current_uploads <= max_uploads:  # Only send DM if this is the first time they've exceeded the limit
+                if current_uploads <= max_uploads:
                     try:
                         await message.author.send(f"You've reached your daily upload limit in the channel.")
                     except discord.errors.Forbidden:
@@ -116,10 +130,20 @@ async def on_message(message):
 @commands.has_permissions(administrator=True)
 async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int):
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("INSERT OR REPLACE INTO settings (channel_id, role_name, max_uploads) VALUES (?, ?, ?)",
+        await db.execute("INSERT OR REPLACE INTO channel_settings (channel_id, role_name, max_uploads) VALUES (?, ?, ?)",
                          (channel_id, role_name, max_uploads))
         await db.commit()
     await ctx.send(f"Channel settings updated for channel {channel_id}")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def set_role_level(ctx, role_name: str, level: int):
+    async with aiosqlite.connect('file_uploads.db') as db:
+        await db.execute("INSERT OR REPLACE INTO role_hierarchy (role_name, level) VALUES (?, ?)",
+                         (role_name, level))
+        await db.commit()
+    await ctx.send(f"Role hierarchy updated for role {role_name}")
+
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')

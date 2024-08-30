@@ -4,27 +4,50 @@
 
 {% block content %}
 <h1 class="text-3xl font-bold mb-4">Discord Bot Settings</h1>
+
+<h2 class="text-2xl font-bold mb-4">Global Settings</h2>
+<form action="{{ url_for('update_global_settings') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+    <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="default_max_uploads">
+            Default Max Uploads (for all channels):
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="default_max_uploads" name="default_max_uploads" value="{{ global_settings[0] if global_settings else '' }}" required>
+    </div>
+    <div class="flex items-center justify-between">
+        <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            Update Global Settings
+        </button>
+    </div>
+</form>
+
+<h2 class="text-2xl font-bold mb-4">Channel Settings</h2>
 <table class="w-full bg-white shadow-md rounded mb-4">
     <thead>
         <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
             <th class="py-3 px-6 text-left">Channel ID</th>
             <th class="py-3 px-6 text-left">Role Name</th>
             <th class="py-3 px-6 text-left">Max Uploads</th>
+            <th class="py-3 px-6 text-left">Actions</th>
         </tr>
     </thead>
     <tbody class="text-gray-600 text-sm font-light">
-        {% for setting in settings %}
+        {% for setting in channel_settings %}
         <tr class="border-b border-gray-200 hover:bg-gray-100">
             <td class="py-3 px-6 text-left whitespace-nowrap">{{ setting['channel_id'] }}</td>
             <td class="py-3 px-6 text-left">{{ setting['role_name'] }}</td>
             <td class="py-3 px-6 text-left">{{ setting['max_uploads'] }}</td>
+            <td class="py-3 px-6 text-left">
+                <form action="{{ url_for('delete_channel_settings', channel_id=setting['channel_id']) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this channel setting?');">
+                    <button type="submit" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">Delete</button>
+                </form>
+            </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 
-<h2 class="text-2xl font-bold mb-4">Update Settings</h2>
-<form action="{{ url_for('update_settings') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+<h2 class="text-2xl font-bold mb-4">Update Channel Settings</h2>
+<form action="{{ url_for('update_channel_settings') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
     <div class="mb-4">
         <label class="block text-gray-700 text-sm font-bold mb-2" for="channel_id">
             Channel ID:
@@ -45,7 +68,52 @@
     </div>
     <div class="flex items-center justify-between">
         <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
-            Update
+            Update Channel Settings
+        </button>
+    </div>
+</form>
+
+<h2 class="text-2xl font-bold mb-4">Role Hierarchy</h2>
+<table class="w-full bg-white shadow-md rounded mb-4">
+    <thead>
+        <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+            <th class="py-3 px-6 text-left">Role Name</th>
+            <th class="py-3 px-6 text-left">Level</th>
+            <th class="py-3 px-6 text-left">Actions</th>
+        </tr>
+    </thead>
+    <tbody class="text-gray-600 text-sm font-light">
+        {% for role in role_hierarchy %}
+        <tr class="border-b border-gray-200 hover:bg-gray-100">
+            <td class="py-3 px-6 text-left">{{ role['role_name'] }}</td>
+            <td class="py-3 px-6 text-left">{{ role['level'] }}</td>
+            <td class="py-3 px-6 text-left">
+                <form action="{{ url_for('delete_role_hierarchy', role_name=role['role_name']) }}" method="post" onsubmit="return confirm('Are you sure you want to delete this role hierarchy entry?');">
+                    <button type="submit" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2 class="text-2xl font-bold mb-4">Update Role Hierarchy</h2>
+<form action="{{ url_for('update_role_hierarchy') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+    <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="role_name">
+            Role Name:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="text" id="role_name" name="role_name" required>
+    </div>
+    <div class="mb-6">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="level">
+            Level:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="level" name="level" required>
+    </div>
+    <div class="flex items-center justify-between">
+        <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            Update Role Hierarchy
         </button>
     </div>
 </form>
