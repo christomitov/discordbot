@@ -100,17 +100,18 @@ async def on_message(message):
 
             if new_upload_count > max_uploads:
                 await message.delete()
-                try:
-                    await message.author.send(f"You've reached your daily upload limit in the channel.")
-                except discord.errors.Forbidden:
-                    print(f"Unable to send DM to user {message.author.name}")
+                if current_uploads <= max_uploads:  # Only send DM if this is the first time they've exceeded the limit
+                    try:
+                        await message.author.send(f"You've reached your daily upload limit in the channel.")
+                    except discord.errors.Forbidden:
+                        print(f"Unable to send DM to user {message.author.name}")
             else:
                 await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
 
             await db.commit()
 
     await bot.process_commands(message)
-
+    
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int):
