@@ -142,9 +142,14 @@ async def on_message(message):
                     # All attachments allowed
                     new_message = message
 
-                new_upload_count = current_uploads + allowed_attachments
+                # Update the upload count with the actual number of attachments in the message
+                new_upload_count = current_uploads + len(message.attachments)
+                # Ensure we don't exceed the max_uploads limit
+                new_upload_count = min(new_upload_count, max_uploads)
+                
                 await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
                 await db.commit()
+                print(f"Updated upload count for user {username}: {new_upload_count}")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
