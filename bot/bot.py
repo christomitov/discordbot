@@ -28,7 +28,6 @@ else:
 # Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
-intents.message_content = True
 intents.guild_messages = True
 intents.dm_messages = True
 intents.guild_reactions = True
@@ -142,14 +141,15 @@ async def on_message(message):
                     # All attachments allowed
                     new_message = message
 
-                # Update the upload count with the actual number of attachments in the message
-                new_upload_count = current_uploads + len(message.attachments)
-                # Ensure we don't exceed the max_uploads limit
-                new_upload_count = min(new_upload_count, max_uploads)
-                
+                # Update the upload count with the number of allowed attachments
+                new_upload_count = current_uploads + allowed_attachments
+
                 await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
                 await db.commit()
                 print(f"Updated upload count for user {username}: {new_upload_count}")
+                
+                await send_private_message(message.channel, message.author, 
+                    f"{message.author.mention}, your current upload count is now {new_upload_count}/{max_uploads}.")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
@@ -175,6 +175,30 @@ async def set_role_level(ctx, role_name: str, level: int):
                          (role_name, level))
         await db.commit()
     await ctx.send(f"Role hierarchy updated for role {role_name}")
+
+@bot.command()
+async def check_uploads(ctx):
+    user_id = ctx.author.id
+    async with aiosqlite.connect('file_uploads.db') as db:
+        # Get user's current upload count
+        async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
+            user_uploads = await cursor.fetchone()
+        
+        # Get user's max uploads
+        user_roles = [role.name for role in ctx.author.roles]
+        async with db.execute("SELECT max_uploads FROM channel_settings WHERE role_name IN ({}) ORDER BY order_index".format(','.join('?' * len(user_roles))), user_roles) as cursor:
+            max_uploads_result = await cursor.fetchone()
+        
+        if max_uploads_result:
+            max_uploads = max_uploads_result[0]
+        else:
+            # If no role-specific setting, use global setting
+            async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
+                global_settings = await cursor.fetchone()
+            max_uploads = global_settings[0] if global_settings else "unlimited"
+
+    current_uploads = user_uploads[0] if user_uploads else 0
+    await ctx.send(f"{ctx.author.mention}, your current upload count is {current_uploads}/{max_uploads}.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')
