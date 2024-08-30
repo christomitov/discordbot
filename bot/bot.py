@@ -91,20 +91,22 @@ async def on_message(message):
 
         async with aiosqlite.connect('file_uploads.db') as db:
             # Get all channel settings ordered by priority
-            async with db.execute("SELECT role_name, max_uploads FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
-                channel_settings = await cursor.fetchall()
+            async with db.execute("SELECT channel_id, role_name, max_uploads FROM channel_settings ORDER BY order_index") as cursor:
+                all_channel_settings = await cursor.fetchall()
 
             # Get global settings
             async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
                 global_settings = await cursor.fetchone()
 
-            # Determine max_uploads based on user's highest role
+            # Get user's roles
             user_roles = [role.name for role in message.author.roles]
+
+            # Determine max_uploads based on user's highest role across all channels
             max_uploads = None
-            for role_name, role_max_uploads in channel_settings:
+            for channel_id_setting, role_name, role_max_uploads in all_channel_settings:
                 if role_name in user_roles:
                     max_uploads = role_max_uploads
-                    break
+                    break  # Break after finding the highest role the user has
 
             if max_uploads is None:
                 if global_settings:
@@ -143,11 +145,10 @@ async def on_message(message):
                 new_upload_count = current_uploads + allowed_attachments
                 await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
                 await db.commit()
-                print(f"Updated upload count for user {username}: {new_upload_count}")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
-                    f"{message.author.mention}, you've reached your daily upload limit in this channel.")
+                    f"{message.author.mention}, you've reached your daily upload limit across all channels.")
                 await message.delete()
 
     await bot.process_commands(message)
