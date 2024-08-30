@@ -94,34 +94,26 @@ async def on_message(message):
             async with db.execute("SELECT role_name, max_uploads FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
                 channel_settings = await cursor.fetchall()
 
-            if not channel_settings:
-                async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
-                    global_settings = await cursor.fetchone()
+            # Get global settings
+            async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
+                global_settings = await cursor.fetchone()
+
+            # Determine max_uploads based on user's highest role
+            user_roles = [role.name for role in message.author.roles]
+            max_uploads = None
+            for role_name, role_max_uploads in channel_settings:
+                if role_name in user_roles:
+                    max_uploads = role_max_uploads
+                    break
+
+            if max_uploads is None:
                 if global_settings:
                     max_uploads = global_settings[0]
-                    required_role_name = None  # No specific role required for global limit
                 else:
-                    return  # No global setting, allow unlimited uploads
-            else:
-                # Check user's roles against channel settings in order
-                user_roles = [role.name for role in message.author.roles]
-                for required_role_name, max_uploads in channel_settings:
-                    if required_role_name in user_roles:
-                        break
-                else:
-                    # If no matching role found, use global settings or deny upload
-                    async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
-                        global_settings = await cursor.fetchone()
-                    if global_settings:
-                        max_uploads = global_settings[0]
-                        required_role_name = None
-                    else:
-                        await send_private_message(message.channel, message.author, 
-                            f"{message.author.mention}, you don't have the required role to upload files in this channel.")
-                        await message.delete()
-                        return
+                    # No settings found, allow unlimited uploads
+                    return
 
-            # Check user's upload count
+            # Check user's current upload count
             async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
                 user_uploads = await cursor.fetchone()
 
@@ -147,10 +139,11 @@ async def on_message(message):
                 else:
                     # All attachments allowed
                     new_message = message
-                
+
                 new_upload_count = current_uploads + allowed_attachments
                 await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
                 await db.commit()
+                print(f"Updated upload count for user {username}: {new_upload_count}")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
