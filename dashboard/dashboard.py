@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 import sqlite3
 import os
 from dotenv import load_dotenv
@@ -18,15 +18,6 @@ def get_db_connection():
 def index():
     return redirect(url_for('settings'))
 
-@app.route('/settings')
-def settings():
-    conn = get_db_connection()
-    channel_settings = conn.execute("SELECT * FROM channel_settings").fetchall()
-    role_hierarchy = conn.execute("SELECT * FROM role_hierarchy").fetchall()
-    global_settings = conn.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1").fetchone()
-    conn.close()
-    return render_template('settings.html', channel_settings=channel_settings, role_hierarchy=role_hierarchy, global_settings=global_settings, active_page='settings')
-
 @app.route('/update_global_settings', methods=['POST'])
 def update_global_settings():
     default_max_uploads = request.form['default_max_uploads']
@@ -39,6 +30,41 @@ def update_global_settings():
 
     flash('Global settings updated successfully!', 'success')
     return redirect(url_for('settings'))
+
+@app.route('/settings')
+def settings():
+    conn = get_db_connection()
+    channel_settings = conn.execute("SELECT * FROM channel_settings ORDER BY order_index").fetchall()
+    global_settings = conn.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1").fetchone()
+    conn.close()
+    return render_template('settings.html', channel_settings=channel_settings, global_settings=global_settings, active_page='settings')
+
+@app.route('/update_channel_settings', methods=['POST'])
+def update_channel_settings():
+    channel_id = request.form['channel_id']
+    role_name = request.form['role_name']
+    max_uploads = request.form['max_uploads']
+
+    conn = get_db_connection()
+    max_order = conn.execute("SELECT MAX(order_index) FROM channel_settings").fetchone()[0]
+    new_order = max_order + 1 if max_order is not None else 0
+    conn.execute("INSERT INTO channel_settings (channel_id, role_name, max_uploads, order_index) VALUES (?, ?, ?, ?)",
+                 (channel_id, role_name, max_uploads, new_order))
+    conn.commit()
+    conn.close()
+
+    flash('Channel settings updated successfully!', 'success')
+    return redirect(url_for('settings'))
+
+@app.route('/reorder_channel_settings', methods=['POST'])
+def reorder_channel_settings():
+    new_order = request.json['new_order']
+    conn = get_db_connection()
+    for index, setting_id in enumerate(new_order):
+        conn.execute("UPDATE channel_settings SET order_index = ? WHERE id = ?", (index, setting_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'success'})
 
 @app.route('/update_channel_settings', methods=['POST'])
 def update_channel_settings():
