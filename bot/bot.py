@@ -50,16 +50,13 @@ scheduler.start()
 
 async def send_private_message(channel, user, content):
     try:
-        # Attempt to send a direct message to the user
         await user.send(content)
         print(f"Private message sent to {user.name}")
     except discord.errors.Forbidden:
         print(f"Unable to send DM to {user.name}. Sending in channel instead.")
-        # If DM fails, send a message in the channel that only the user can see
         await channel.send(f"{user.mention} {content}", delete_after=10)
     except Exception as e:
         print(f"Unexpected error in send_private_message: {e}")
-        # Fallback to regular channel message
         await channel.send(f"{user.mention} {content}", delete_after=10)
 
 @bot.event
@@ -120,7 +117,6 @@ async def on_message(message):
 
             if user_uploads:
                 current_uploads = user_uploads[0]
-                await db.execute("UPDATE user_uploads SET username = ? WHERE user_id = ?", (username, user_id))
             else:
                 current_uploads = 0
                 await db.execute("INSERT INTO user_uploads (user_id, username, uploads, last_reset) VALUES (?, ?, 0, ?)", 
@@ -135,7 +131,7 @@ async def on_message(message):
                     new_message = await message.channel.send(content=message.content, 
                                                              files=message.attachments[:allowed_attachments])
                     await send_private_message(message.channel, message.author, 
-                        f"{message.author.mention}, only {allowed_attachments} of your {len(message.attachments)} uploads were allowed due to daily limit.")
+                        f"Only {allowed_attachments} of your {len(message.attachments)} uploads were allowed due to daily limit.")
                     await message.delete()
                 else:
                     # All attachments allowed
@@ -143,41 +139,40 @@ async def on_message(message):
 
                 # Update the upload count with the number of allowed attachments
                 new_upload_count = current_uploads + allowed_attachments
-
-                await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
+                await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
+                                 (new_upload_count, username, user_id))
                 await db.commit()
                 print(f"Updated upload count for user {username}: {new_upload_count}")
-                
+
                 await send_private_message(message.channel, message.author, 
-                    f"{message.author.mention}, your current upload count is now {new_upload_count}/{max_uploads}.")
+                    f"Your current upload count is now {new_upload_count}/{max_uploads}.")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
-                    f"{message.author.mention}, you've reached your daily upload limit across all channels.")
+                    f"You've reached your daily upload limit of {max_uploads} across all channels.")
                 await message.delete()
 
     await bot.process_commands(message)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int):
+async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int, order_index: int):
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("INSERT OR REPLACE INTO channel_settings (channel_id, role_name, max_uploads) VALUES (?, ?, ?)",
-                         (channel_id, role_name, max_uploads))
+        await db.execute("INSERT OR REPLACE INTO channel_settings (channel_id, role_name, max_uploads, order_index) VALUES (?, ?, ?, ?)",
+                         (channel_id, role_name, max_uploads, order_index))
         await db.commit()
     await ctx.send(f"Channel settings updated for channel {channel_id}")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def set_role_level(ctx, role_name: str, level: int):
+async def set_global_limit(ctx, max_uploads: int):
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("INSERT OR REPLACE INTO role_hierarchy (role_name, level) VALUES (?, ?)",
-                         (role_name, level))
+        await db.execute("INSERT OR REPLACE INTO global_settings (id, default_max_uploads) VALUES (1, ?)", (max_uploads,))
         await db.commit()
-    await ctx.send(f"Role hierarchy updated for role {role_name}")
+    await ctx.send(f"Global upload limit set to {max_uploads}")
 
 @bot.command()
-async def check_remaining_uploads(ctx):
+async def check_uploads(ctx):
     user_id = ctx.author.id
     async with aiosqlite.connect('file_uploads.db') as db:
         # Get user's current upload count
@@ -199,7 +194,7 @@ async def check_remaining_uploads(ctx):
 
     current_uploads = user_uploads[0] if user_uploads else 0
     remaining_uploads = max_uploads - current_uploads if isinstance(max_uploads, int) else "unlimited"
-    await ctx.send(f"{ctx.author.mention}, you have {remaining_uploads} uploads remaining for today.")
+    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads. You have {remaining_uploads} uploads remaining for today.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')
