@@ -1,35 +1,6 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Discord Bot Dashboard</title>
-</head>
-<body>
-    <h1>Discord Bot Settings</h1>
-    <table>
-        <tr>
-            <th>Channel ID</th>
-            <th>Role Name</th>
-            <th>Max Uploads</th>
-        </tr>
-        {% for setting in settings %}
-        <tr>
-            <td>{{ setting[0] }}</td>
-            <td>{{ setting[1] }}</td>
-            <td>{{ setting[2] }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    <h2>Update Settings</h2>
-    <form action="{{ url_for('update_settings') }}" method="post">
-        <label for="channel_id">Channel ID:</label>
-        <input type="number" id="channel_id" name="channel_id" required><br>
-        <label for="role_name">Role Name:</label>
-        <input type="text" id="role_name" name="role_name" required><br>
-        <label for="max_uploads">Max Uploads:</label>
-        <input type="number" id="max_uploads" name="max_uploads" required><br>
-        <input type="submit" value="Update">
-    </form>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="text-3xl font-bold mb-4">Welcome to Discord Bot Dashboard</h1>
+<p class="mb-4">Use the navigation above to manage bot settings and view user information.</p>
+{% endblock %}

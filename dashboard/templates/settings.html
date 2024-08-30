@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Bot Settings{% endblock %}
+
+{% block content %}
+<h1 class="text-3xl font-bold mb-4">Discord Bot Settings</h1>
+<table class="w-full bg-white shadow-md rounded mb-4">
+    <thead>
+        <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
+            <th class="py-3 px-6 text-left">Channel ID</th>
+            <th class="py-3 px-6 text-left">Role Name</th>
+            <th class="py-3 px-6 text-left">Max Uploads</th>
+        </tr>
+    </thead>
+    <tbody class="text-gray-600 text-sm font-light">
+        {% for setting in settings %}
+        <tr class="border-b border-gray-200 hover:bg-gray-100">
+            <td class="py-3 px-6 text-left whitespace-nowrap">{{ setting['channel_id'] }}</td>
+            <td class="py-3 px-6 text-left">{{ setting['role_name'] }}</td>
+            <td class="py-3 px-6 text-left">{{ setting['max_uploads'] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<h2 class="text-2xl font-bold mb-4">Update Settings</h2>
+<form action="{{ url_for('update_settings') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+    <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="channel_id">
+            Channel ID:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="channel_id" name="channel_id" required>
+    </div>
+    <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="role_name">
+            Role Name:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="text" id="role_name" name="role_name" required>
+    </div>
+    <div class="mb-6">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="max_uploads">
+            Max Uploads:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="max_uploads" name="max_uploads" required>
+    </div>
+    <div class="flex items-center justify-between">
+        <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            Update
+        </button>
+    </div>
+</form>
+{% endblock %}

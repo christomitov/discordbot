@@ -3,3 +3,4 @@ apscheduler
 Flask
 gunicorn
 python-dotenv
+aiosqlite
