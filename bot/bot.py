@@ -28,6 +28,13 @@ else:
 # Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
+intents.message_content = True
+intents.guild_messages = True
+intents.dm_messages = True
+intents.guild_reactions = True
+intents.dm_reactions = True
+intents.guilds = True
+intents.members = True  # This might require special approval from Discord
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Scheduler setup
@@ -43,11 +50,18 @@ scheduler.add_job(reset_uploads, CronTrigger(hour=0, minute=0))
 scheduler.start()
 
 async def send_private_message(channel, user, content):
-    thread_name = f"private-{user.id}-{datetime.datetime.now().timestamp()}"
-    thread = await channel.create_thread(name=thread_name, auto_archive_duration=60)
-    await thread.add_user(user)
-    await thread.send(content)
-    await thread.edit(archived=True)
+    try:
+        # Attempt to send a direct message to the user
+        await user.send(content)
+        print(f"Private message sent to {user.name}")
+    except discord.errors.Forbidden:
+        print(f"Unable to send DM to {user.name}. Sending in channel instead.")
+        # If DM fails, send a message in the channel that only the user can see
+        await channel.send(f"{user.mention} {content}", delete_after=10)
+    except Exception as e:
+        print(f"Unexpected error in send_private_message: {e}")
+        # Fallback to regular channel message
+        await channel.send(f"{user.mention} {content}", delete_after=10)
 
 @bot.event
 async def on_ready():
@@ -102,9 +116,9 @@ async def on_message(message):
                         max_uploads = global_settings[0]
                         required_role_name = None
                     else:
-                        await message.delete()
                         await send_private_message(message.channel, message.author, 
                             f"{message.author.mention}, you don't have the required role to upload files in this channel.")
+                        await message.delete()
                         return
 
             # Check user's upload count
@@ -119,27 +133,29 @@ async def on_message(message):
                 await db.execute("INSERT INTO user_uploads (user_id, username, uploads, last_reset) VALUES (?, ?, 0, ?)", 
                                  (user_id, username, datetime.datetime.now().isoformat()))
 
-            new_upload_count = current_uploads + len(message.attachments)
+            remaining_uploads = max_uploads - current_uploads
+            allowed_attachments = min(remaining_uploads, len(message.attachments))
 
-            if new_upload_count > max_uploads:
-                allowed_uploads = max(0, max_uploads - current_uploads)
-                if allowed_uploads > 0:
-                    # Allow partial upload
-                    await message.delete()
+            if allowed_attachments > 0:
+                if allowed_attachments < len(message.attachments):
+                    # Partial upload
                     new_message = await message.channel.send(content=message.content, 
-                                                             files=message.attachments[:allowed_uploads])
-                    new_upload_count = current_uploads + allowed_uploads
+                                                             files=message.attachments[:allowed_attachments])
                     await send_private_message(message.channel, message.author, 
-                        f"{message.author.mention}, only {allowed_uploads} of your {len(message.attachments)} uploads were allowed due to daily limit.")
-                else:
-                    # No uploads allowed
+                        f"{message.author.mention}, only {allowed_attachments} of your {len(message.attachments)} uploads were allowed due to daily limit.")
                     await message.delete()
-                    await send_private_message(message.channel, message.author, 
-                        f"{message.author.mention}, you've reached your daily upload limit in this channel.")
-            
-            # Update the upload count in the database
-            await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
-            await db.commit()
+                else:
+                    # All attachments allowed
+                    new_message = message
+                
+                new_upload_count = current_uploads + allowed_attachments
+                await db.execute("UPDATE user_uploads SET uploads = ? WHERE user_id = ?", (new_upload_count, user_id))
+                await db.commit()
+            else:
+                # No uploads allowed
+                await send_private_message(message.channel, message.author, 
+                    f"{message.author.mention}, you've reached your daily upload limit in this channel.")
+                await message.delete()
 
     await bot.process_commands(message)
 
