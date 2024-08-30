@@ -66,21 +66,6 @@ def reorder_channel_settings():
     conn.close()
     return jsonify({'status': 'success'})
 
-@app.route('/update_channel_settings', methods=['POST'])
-def update_channel_settings():
-    channel_id = request.form['channel_id']
-    role_name = request.form['role_name']
-    max_uploads = request.form['max_uploads']
-
-    conn = get_db_connection()
-    conn.execute("INSERT OR REPLACE INTO channel_settings (channel_id, role_name, max_uploads) VALUES (?, ?, ?)",
-                 (channel_id, role_name, max_uploads))
-    conn.commit()
-    conn.close()
-
-    flash('Channel settings updated successfully!', 'success')
-    return redirect(url_for('settings'))
-
 @app.route('/delete_channel_settings/<int:channel_id>', methods=['POST'])
 def delete_channel_settings(channel_id):
     conn = get_db_connection()
