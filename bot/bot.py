@@ -177,7 +177,7 @@ async def set_role_level(ctx, role_name: str, level: int):
     await ctx.send(f"Role hierarchy updated for role {role_name}")
 
 @bot.command()
-async def check_uploads(ctx):
+async def check_remaining_uploads(ctx):
     user_id = ctx.author.id
     async with aiosqlite.connect('file_uploads.db') as db:
         # Get user's current upload count
@@ -198,7 +198,8 @@ async def check_uploads(ctx):
             max_uploads = global_settings[0] if global_settings else "unlimited"
 
     current_uploads = user_uploads[0] if user_uploads else 0
-    await ctx.send(f"{ctx.author.mention}, your current upload count is {current_uploads}/{max_uploads}.")
+    remaining_uploads = max_uploads - current_uploads if isinstance(max_uploads, int) else "unlimited"
+    await ctx.send(f"{ctx.author.mention}, you have {remaining_uploads} uploads remaining for today.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')
