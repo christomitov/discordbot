@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import datetime
 import os
+import io
 from dotenv import load_dotenv, find_dotenv
 
 # Load environment variables
@@ -143,11 +144,16 @@ async def on_message(message):
                     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
             elif remaining_uploads > 0:
                 # Partial upload
-                allowed_attachments = remaining_uploads
-                new_attachments = [att for att in message.attachments if att not in counted_attachments[allowed_attachments:]]
+                allowed_attachments = counted_attachments[:remaining_uploads]
                 
                 try:
-                    new_message = await message.channel.send(content=message.content, files=new_attachments)
+                    files_to_send = []
+                    for attachment in allowed_attachments:
+                        file_data = await attachment.read()
+                        file = discord.File(io.BytesIO(file_data), filename=attachment.filename)
+                        files_to_send.append(file)
+                    
+                    new_message = await message.channel.send(content=message.content, files=files_to_send)
                     await message.delete()
                 except discord.errors.HTTPException as e:
                     print(f"Error sending partial message: {e}")
@@ -162,7 +168,7 @@ async def on_message(message):
                 print(f"Updated upload count for user {username}: {new_upload_count}")
 
                 await send_private_message(message.channel, message.author, 
-                    f"Only {allowed_attachments} of your {attachments_count} .mp3/.wav uploads were allowed due to daily limit. "
+                    f"Only {remaining_uploads} of your {attachments_count} .mp3/.wav uploads were allowed due to daily limit. "
                     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
             else:
                 # No uploads allowed
@@ -178,7 +184,6 @@ async def on_message(message):
                     f"Your upload was not processed.")
 
     await bot.process_commands(message)
-
 
 
 @bot.command()
