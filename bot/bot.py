@@ -85,7 +85,7 @@ async def on_message(message):
         user_id = message.author.id
         username = message.author.name
         
-         # Filter attachments to only count .mp3 and .wav files
+        # Filter attachments to only count .mp3 and .wav files
         counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav'))]
         if not counted_attachments:
             # If no counted attachments, process the message normally without updating upload count
@@ -129,37 +129,46 @@ async def on_message(message):
                                  (user_id, username, datetime.datetime.now().isoformat()))
 
             remaining_uploads = max_uploads - current_uploads
-            allowed_attachments = min(remaining_uploads, len(counted_attachments))
+            new_upload_count = current_uploads + len(counted_attachments)
 
-            if allowed_attachments > 0:
-                if allowed_attachments < len(counted_attachments):
-                    # Partial upload
-                    new_attachments = message.attachments[:message.attachments.index(counted_attachments[allowed_attachments])]
-                    new_message = await message.channel.send(content=message.content, 
-                                                                files=new_attachments)
-                    await send_private_message(message.channel, message.author, 
-                        f"Only {allowed_attachments} of your {len(counted_attachments)} .mp3/.wav uploads were allowed due to daily limit.")
-                    await message.delete()
-                else:
-                    # All attachments allowed
-                    new_message = message
-
-                # Update the upload count with the number of allowed attachments
-                new_upload_count = current_uploads + allowed_attachments
+            if new_upload_count <= max_uploads:
+                # All attachments allowed
+                new_message = message
                 await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
-                                    (new_upload_count, username, user_id))
+                                 (new_upload_count, username, user_id))
                 await db.commit()
                 print(f"Updated upload count for user {username}: {new_upload_count}")
 
                 await send_private_message(message.channel, message.author, 
                     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
             else:
-                # No uploads allowed
-                await send_private_message(message.channel, message.author, 
-                    f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels.")
-                await message.delete()
+                # Partial upload or no upload allowed
+                allowed_attachments = remaining_uploads
+                if allowed_attachments > 0:
+                    # Partial upload
+                    new_attachments = [att for att in message.attachments if att not in counted_attachments[allowed_attachments:]]
+                    new_message = await message.channel.send(content=message.content, 
+                                                             files=new_attachments)
+                    await send_private_message(message.channel, message.author, 
+                        f"Only {allowed_attachments} of your {len(counted_attachments)} .mp3/.wav uploads were allowed due to daily limit.")
+                    await message.delete()
+
+                    new_upload_count = max_uploads
+                    await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
+                                     (new_upload_count, username, user_id))
+                    await db.commit()
+                    print(f"Updated upload count for user {username}: {new_upload_count}")
+
+                    await send_private_message(message.channel, message.author, 
+                        f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
+                else:
+                    # No uploads allowed
+                    await send_private_message(message.channel, message.author, 
+                        f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels.")
+                    await message.delete()
 
     await bot.process_commands(message)
+
 
 @bot.command()
 @commands.has_permissions(administrator=True)
