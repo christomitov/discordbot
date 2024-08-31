@@ -84,6 +84,12 @@ async def on_message(message):
         channel_id = message.channel.id
         user_id = message.author.id
         username = message.author.name
+        
+         # Filter attachments to only count .mp3 and .wav files
+        counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav'))]
+        if not counted_attachments:
+            # If no counted attachments, process the message normally without updating upload count
+            return await bot.process_commands(message)
 
         async with aiosqlite.connect('file_uploads.db') as db:
             # Get all channel settings ordered by priority
@@ -123,15 +129,16 @@ async def on_message(message):
                                  (user_id, username, datetime.datetime.now().isoformat()))
 
             remaining_uploads = max_uploads - current_uploads
-            allowed_attachments = min(remaining_uploads, len(message.attachments))
+            allowed_attachments = min(remaining_uploads, len(counted_attachments))
 
             if allowed_attachments > 0:
-                if allowed_attachments < len(message.attachments):
+                if allowed_attachments < len(counted_attachments):
                     # Partial upload
+                    new_attachments = message.attachments[:message.attachments.index(counted_attachments[allowed_attachments])]
                     new_message = await message.channel.send(content=message.content, 
-                                                             files=message.attachments[:allowed_attachments])
+                                                                files=new_attachments)
                     await send_private_message(message.channel, message.author, 
-                        f"Only {allowed_attachments} of your {len(message.attachments)} uploads were allowed due to daily limit.")
+                        f"Only {allowed_attachments} of your {len(counted_attachments)} .mp3/.wav uploads were allowed due to daily limit.")
                     await message.delete()
                 else:
                     # All attachments allowed
@@ -140,16 +147,16 @@ async def on_message(message):
                 # Update the upload count with the number of allowed attachments
                 new_upload_count = current_uploads + allowed_attachments
                 await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
-                                 (new_upload_count, username, user_id))
+                                    (new_upload_count, username, user_id))
                 await db.commit()
                 print(f"Updated upload count for user {username}: {new_upload_count}")
 
                 await send_private_message(message.channel, message.author, 
-                    f"Your current upload count is now {new_upload_count}/{max_uploads}.")
+                    f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
             else:
                 # No uploads allowed
                 await send_private_message(message.channel, message.author, 
-                    f"You've reached your daily upload limit of {max_uploads} across all channels.")
+                    f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels.")
                 await message.delete()
 
     await bot.process_commands(message)
