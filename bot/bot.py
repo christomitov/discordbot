@@ -59,6 +59,7 @@ async def send_private_message(channel, user, content):
     except Exception as e:
         print(f"Unexpected error in send_private_message: {e}")
         await channel.send(f"{user.mention} {content}", delete_after=10)
+        
 
 @bot.event
 async def on_ready():
@@ -74,6 +75,8 @@ async def on_ready():
                              order_index INTEGER)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS global_settings
                             (id INTEGER PRIMARY KEY CHECK (id = 1), default_max_uploads INTEGER)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS blocked_channels
+                            (channel_id INTEGER PRIMARY KEY)''')
         await db.commit()
 
 @bot.event
@@ -93,6 +96,23 @@ async def on_message(message):
             return await bot.process_commands(message)
 
         async with aiosqlite.connect('file_uploads.db') as db:
+            # Check if the channel is in the blocked list
+            async with db.execute("SELECT 1 FROM blocked_channels WHERE channel_id = ?", (channel_id,)) as cursor:
+                is_blocked = await cursor.fetchone()
+
+            if is_blocked:
+                # If the channel is blocked, delete the message and notify the user
+                try:
+                    await message.delete()
+                    await send_private_message(message.channel, message.author, 
+                        f"Your message was deleted because .mp3/.wav uploads are not allowed in this channel.")
+                    return
+                except discord.errors.NotFound:
+                    print(f"Message {message.id} was already deleted")
+                except discord.errors.Forbidden:
+                    print(f"Bot doesn't have permission to delete message {message.id}")
+                    return
+
             # Get all channel settings ordered by priority
             async with db.execute("SELECT channel_id, role_name, max_uploads FROM channel_settings ORDER BY order_index") as cursor:
                 all_channel_settings = await cursor.fetchall()
@@ -140,51 +160,25 @@ async def on_message(message):
                 await db.commit()
                 print(f"Updated upload count for user {username}: {new_upload_count}")
 
-                await send_private_message(message.channel, message.author, 
-                    f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
-            elif remaining_uploads > 0:
-                # Partial upload
-                allowed_attachments = counted_attachments[:remaining_uploads]
-                
-                try:
-                    files_to_send = []
-                    for attachment in allowed_attachments:
-                        file_data = await attachment.read()
-                        file = discord.File(io.BytesIO(file_data), filename=attachment.filename)
-                        files_to_send.append(file)
-                    
-                    new_message = await message.channel.send(content=message.content, files=files_to_send)
-                    await message.delete()
-                except discord.errors.HTTPException as e:
-                    print(f"Error sending partial message: {e}")
-                    await send_private_message(message.channel, message.author, 
-                        "There was an error processing your upload. Please try again with fewer attachments.")
-                    return
-
-                new_upload_count = max_uploads
-                await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
-                                 (new_upload_count, username, user_id))
-                await db.commit()
-                print(f"Updated upload count for user {username}: {new_upload_count}")
-
-                await send_private_message(message.channel, message.author, 
-                    f"Only {remaining_uploads} of your {attachments_count} .mp3/.wav uploads were allowed due to daily limit. "
-                    f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
+                # await send_private_message(message.channel, message.author, 
+                #     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
             else:
-                # No uploads allowed
+                # Upload limit exceeded
                 try:
                     await message.delete()
+                    await send_private_message(message.channel, message.author, 
+                        f"Your upload was deleted as it would exceed your daily limit. "
+                        f"You have {remaining_uploads} uploads remaining out of {max_uploads}. ")
                 except discord.errors.NotFound:
                     print(f"Message {message.id} was already deleted")
                 except discord.errors.Forbidden:
                     print(f"Bot doesn't have permission to delete message {message.id}")
-                
-                await send_private_message(message.channel, message.author, 
-                    f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels. "
-                    f"Your upload was not processed.")
+                    await message.channel.send(
+                        f"{message.author.mention}, your upload exceeds your daily limit. "
+                        f"You have {remaining_uploads} uploads remaining out of {max_uploads}. "
+                        f"Please delete this message and upload fewer files.")
 
     await bot.process_commands(message)
-
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -210,23 +204,9 @@ async def check_uploads(ctx):
         # Get user's current upload count
         async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
             user_uploads = await cursor.fetchone()
-        
-        # Get user's max uploads
-        user_roles = [role.name for role in ctx.author.roles]
-        async with db.execute("SELECT max_uploads FROM channel_settings WHERE role_name IN ({}) ORDER BY order_index".format(','.join('?' * len(user_roles))), user_roles) as cursor:
-            max_uploads_result = await cursor.fetchone()
-        
-        if max_uploads_result:
-            max_uploads = max_uploads_result[0]
-        else:
-            # If no role-specific setting, use global setting
-            async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
-                global_settings = await cursor.fetchone()
-            max_uploads = global_settings[0] if global_settings else "unlimited"
 
     current_uploads = user_uploads[0] if user_uploads else 0
-    remaining_uploads = max_uploads - current_uploads if isinstance(max_uploads, int) else "unlimited"
-    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads. You have {remaining_uploads} uploads remaining for today.")
+    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')

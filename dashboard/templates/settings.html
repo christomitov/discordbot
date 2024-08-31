@@ -59,6 +59,34 @@
     </div>
 </form>
 
+<h2 class="text-2xl font-bold mb-4">Blocked Channels (No MP3/WAV Uploads)</h2>
+<ul id="blockedChannelsList" class="w-full bg-white shadow-md rounded mb-4">
+    {% for channel in blocked_channels %}
+    <li class="border-b border-gray-200 hover:bg-gray-100 p-4">
+        <div class="flex justify-between items-center">
+            <span>Channel ID: {{ channel['channel_id'] }}</span>
+            <button onclick="deleteBlockedChannel({{ channel['channel_id'] }})" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">Delete</button>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+
+<h2 class="text-2xl font-bold mb-4">Add Blocked Channel</h2>
+<form action="{{ url_for('add_blocked_channel') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+    <div class="mb-4">
+        <label class="block text-gray-700 text-sm font-bold mb-2" for="blocked_channel_id">
+            Channel ID:
+        </label>
+        <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="blocked_channel_id" name="blocked_channel_id" required>
+    </div>
+    <div class="flex items-center justify-between">
+        <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+            Add Blocked Channel
+        </button>
+    </div>
+</form>
+
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', (event) => {
@@ -98,6 +126,20 @@ function deleteSetting(id) {
                     location.reload();
                 } else {
                     alert('Failed to delete setting');
+                }
+            });
+    }
+}
+
+function deleteBlockedChannel(channelId) {
+    if (confirm('Are you sure you want to remove this channel from the blocked list?')) {
+        fetch(`/delete_blocked_channel/${channelId}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    location.reload();
+                } else {
+                    alert('Failed to remove channel from blocked list');
                 }
             });
     }
