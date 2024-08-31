@@ -129,11 +129,11 @@ async def on_message(message):
                                  (user_id, username, datetime.datetime.now().isoformat()))
 
             remaining_uploads = max_uploads - current_uploads
-            new_upload_count = current_uploads + len(counted_attachments)
+            attachments_count = len(counted_attachments)
 
-            if new_upload_count <= max_uploads:
+            if remaining_uploads >= attachments_count:
                 # All attachments allowed
-                new_message = message
+                new_upload_count = current_uploads + attachments_count
                 await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
                                  (new_upload_count, username, user_id))
                 await db.commit()
@@ -141,33 +141,44 @@ async def on_message(message):
 
                 await send_private_message(message.channel, message.author, 
                     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
-            else:
-                # Partial upload or no upload allowed
+            elif remaining_uploads > 0:
+                # Partial upload
                 allowed_attachments = remaining_uploads
-                if allowed_attachments > 0:
-                    # Partial upload
-                    new_attachments = [att for att in message.attachments if att not in counted_attachments[allowed_attachments:]]
-                    new_message = await message.channel.send(content=message.content, 
-                                                             files=new_attachments)
-                    await send_private_message(message.channel, message.author, 
-                        f"Only {allowed_attachments} of your {len(counted_attachments)} .mp3/.wav uploads were allowed due to daily limit.")
+                new_attachments = [att for att in message.attachments if att not in counted_attachments[allowed_attachments:]]
+                
+                try:
+                    new_message = await message.channel.send(content=message.content, files=new_attachments)
                     await message.delete()
-
-                    new_upload_count = max_uploads
-                    await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
-                                     (new_upload_count, username, user_id))
-                    await db.commit()
-                    print(f"Updated upload count for user {username}: {new_upload_count}")
-
+                except discord.errors.HTTPException as e:
+                    print(f"Error sending partial message: {e}")
                     await send_private_message(message.channel, message.author, 
-                        f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
-                else:
-                    # No uploads allowed
-                    await send_private_message(message.channel, message.author, 
-                        f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels.")
+                        "There was an error processing your upload. Please try again with fewer attachments.")
+                    return
+
+                new_upload_count = max_uploads
+                await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
+                                 (new_upload_count, username, user_id))
+                await db.commit()
+                print(f"Updated upload count for user {username}: {new_upload_count}")
+
+                await send_private_message(message.channel, message.author, 
+                    f"Only {allowed_attachments} of your {attachments_count} .mp3/.wav uploads were allowed due to daily limit. "
+                    f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
+            else:
+                # No uploads allowed
+                try:
                     await message.delete()
+                except discord.errors.NotFound:
+                    print(f"Message {message.id} was already deleted")
+                except discord.errors.Forbidden:
+                    print(f"Bot doesn't have permission to delete message {message.id}")
+                
+                await send_private_message(message.channel, message.author, 
+                    f"You've reached your daily .mp3/.wav upload limit of {max_uploads} across all channels. "
+                    f"Your upload was not processed.")
 
     await bot.process_commands(message)
+
 
 
 @bot.command()
