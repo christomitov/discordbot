@@ -9,27 +9,45 @@
         <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
             <th class="py-3 px-6 text-left">User ID</th>
             <th class="py-3 px-6 text-left">Username</th>
+            <th class="py-3 px-6 text-left">Channel</th>
             <th class="py-3 px-6 text-left">Uploads</th>
             <th class="py-3 px-6 text-left">Last Reset</th>
             <th class="py-3 px-6 text-left">Actions</th>
         </tr>
     </thead>
     <tbody class="text-gray-600 text-sm font-light">
+        {% set current_user = None %}
         {% for user in users %}
-        <tr class="border-b border-gray-200 hover:bg-gray-100">
-            <td class="py-3 px-6 text-left whitespace-nowrap">{{ user['user_id'] }}</td>
-            <td class="py-3 px-6 text-left">{{ user['username'] }}</td>
-            <td class="py-3 px-6 text-left">{{ user['uploads'] }}</td>
-            <td class="py-3 px-6 text-left">{{ user['last_reset'] }}</td>
-            <td class="py-3 px-6 text-left">
-                <form action="{{ url_for('reset_user', user_id=user['user_id']) }}" method="post" class="inline">
-                    <button type="submit" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">
-                        Reset
-                    </button>
-                </form>
-            </td>
-        </tr>
+            {% if user['user_id'] != current_user %}
+                {% if current_user is not none %}
+                    <tr class="border-b border-gray-200 bg-gray-50">
+                        <td colspan="6" class="py-2 px-6 text-left font-bold">Total Uploads: {{ user_total_uploads }}</td>
+                    </tr>
+                {% endif %}
+                {% set current_user = user['user_id'] %}
+                {% set user_total_uploads = 0 %}
+            {% endif %}
+            {% set user_total_uploads = user_total_uploads + user['uploads'] %}
+            <tr class="border-b border-gray-200 hover:bg-gray-100">
+                <td class="py-3 px-6 text-left whitespace-nowrap">{{ user['user_id'] }}</td>
+                <td class="py-3 px-6 text-left">{{ user['username'] }}</td>
+                <td class="py-3 px-6 text-left">{{ user['channel_name'] }} ({{ user['channel_id'] }})</td>
+                <td class="py-3 px-6 text-left">{{ user['uploads'] }}</td>
+                <td class="py-3 px-6 text-left">{{ user['last_reset'] }}</td>
+                <td class="py-3 px-6 text-left">
+                    <form action="{{ url_for('reset_user', user_id=user['user_id'], channel_id=user['channel_id']) }}" method="post" class="inline">
+                        <button type="submit" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">
+                            Reset
+                        </button>
+                    </form>
+                </td>
+            </tr>
         {% endfor %}
+        {% if users %}
+            <tr class="border-b border-gray-200 bg-gray-50">
+                <td colspan="6" class="py-2 px-6 text-left font-bold">Total Uploads: {{ user_total_uploads }}</td>
+            </tr>
+        {% endif %}
     </tbody>
 </table>
 {% endblock %}

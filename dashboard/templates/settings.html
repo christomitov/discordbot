@@ -21,16 +21,26 @@
 </form>
 
 <h2 class="text-2xl font-bold mb-4">Channel Settings</h2>
-<ul id="channelSettingsList" class="w-full bg-white shadow-md rounded mb-4">
-    {% for setting in channel_settings %}
+{% set current_channel = None %}
+{% for setting in channel_settings %}
+    {% if setting['channel_id'] != current_channel %}
+        {% if current_channel is not none %}
+            </ul>
+        {% endif %}
+        <h3 class="text-xl font-bold mt-4 mb-2">Channel ID: {{ setting['channel_id'] }}</h3>
+        <ul id="channelSettingsList_{{ setting['channel_id'] }}" class="w-full bg-white shadow-md rounded mb-4">
+        {% set current_channel = setting['channel_id'] %}
+    {% endif %}
     <li class="border-b border-gray-200 hover:bg-gray-100 p-4 cursor-move" data-id="{{ setting['id'] }}">
         <div class="flex justify-between items-center">
-            <span>Channel: {{ setting['channel_id'] }}, Role: {{ setting['role_name'] }}, Max Uploads: {{ setting['max_uploads'] }}</span>
+            <span>Role: {{ setting['role_name'] }}, Max Uploads: {{ setting['max_uploads'] }}</span>
             <button onclick="deleteSetting({{ setting['id'] }})" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">Delete</button>
         </div>
     </li>
-    {% endfor %}
-</ul>
+{% endfor %}
+{% if channel_settings %}
+    </ul>
+{% endif %}
 
 <h2 class="text-2xl font-bold mb-4">Add Channel Setting</h2>
 <form action="{{ url_for('update_channel_settings') }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
@@ -90,30 +100,32 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', (event) => {
-    var el = document.getElementById('channelSettingsList');
-    var sortable = Sortable.create(el, {
-        animation: 150,
-        ghostClass: 'bg-gray-300',
-        onEnd: function (evt) {
-            var itemEl = evt.item;
-            var newOrder = Array.from(el.children).map(li => li.dataset.id);
-            
-            fetch('{{ url_for("reorder_channel_settings") }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({new_order: newOrder}),
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    console.log('Reordering successful');
-                } else {
-                    console.error('Reordering failed');
-                }
-            });
-        }
+    document.querySelectorAll('[id^="channelSettingsList_"]').forEach(el => {
+        var channelId = el.id.split('_')[1];
+        var sortable = Sortable.create(el, {
+            animation: 150,
+            ghostClass: 'bg-gray-300',
+            onEnd: function (evt) {
+                var itemEl = evt.item;
+                var newOrder = Array.from(el.children).map(li => li.dataset.id);
+                
+                fetch('{{ url_for("reorder_channel_settings") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({new_order: newOrder, channel_id: channelId}),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log('Reordering successful');
+                    } else {
+                        console.error('Reordering failed');
+                    }
+                });
+            }
+        });
     });
 });
 
@@ -130,7 +142,6 @@ function deleteSetting(id) {
             });
     }
 }
-
 function deleteBlockedChannel(channelId) {
     if (confirm('Are you sure you want to remove this channel from the blocked list?')) {
         fetch(`/delete_blocked_channel/${channelId}`, { method: 'POST' })

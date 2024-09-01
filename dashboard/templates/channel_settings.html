@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Channel Settings - {{ channel['channel_name'] }}{% endblock %}
+
+{% block content %}
+<h1 class="text-3xl font-bold mb-4">Channel Settings: {{ channel['channel_name'] }}</h1>
+
+<div class="mb-8">
+    <h2 class="text-2xl font-bold mb-4">Channel Status</h2>
+    <form action="{{ url_for('toggle_channel_block', channel_id=channel['channel_id']) }}" method="post" class="inline">
+        <button type="submit" class="{% if is_blocked %}bg-green-500 hover:bg-green-700{% else %}bg-red-500 hover:bg-red-700{% endif %} text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+            {% if is_blocked %}Unblock Channel{% else %}Block Channel{% endif %}
+        </button>
+    </form>
+    <p class="mt-2 text-gray-600">
+        {% if is_blocked %}
+            This channel is currently blocked. No .mp3 or .wav uploads are allowed.
+        {% else %}
+            This channel is currently active. Uploads are allowed according to role limits.
+        {% endif %}
+    </p>
+</div>
+
+<div class="mb-8">
+    <h2 class="text-2xl font-bold mb-4">Role Upload Limits</h2>
+    {% if settings %}
+        <ul id="roleLimitsList" class="w-full bg-white shadow-md rounded mb-4">
+            {% for setting in settings %}
+            <li class="border-b border-gray-200 hover:bg-gray-100 p-4 cursor-move" data-id="{{ setting['id'] }}">
+                <div class="flex justify-between items-center">
+                    <span>{{ setting['role_name'] }}: {{ setting['max_uploads'] }} uploads</span>
+                    <form action="{{ url_for('delete_channel_settings', channel_id=channel['channel_id'], setting_id=setting['id']) }}" method="post" class="inline">
+                        <button type="submit" class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded focus:outline-none focus:shadow-outline">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="text-sm text-gray-600 mt-2">Drag and drop to reorder. Higher roles in the list take precedence.</p>
+    {% else %}
+        <p class="text-gray-600">No role-specific upload limits set for this channel.</p>
+    {% endif %}
+</div>
+
+<div class="mb-8">
+    <h2 class="text-2xl font-bold mb-4">Add Role Upload Limit</h2>
+    <form action="{{ url_for('update_channel_settings', channel_id=channel['channel_id']) }}" method="post" class="bg-white shadow-md rounded px-8 pt-6 pb-8 mb-4">
+        <div class="mb-4">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="role_name">
+                Role Name:
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="text" id="role_name" name="role_name" required>
+        </div>
+        <div class="mb-6">
+            <label class="block text-gray-700 text-sm font-bold mb-2" for="max_uploads">
+                Max Uploads:
+            </label>
+            <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="number" id="max_uploads" name="max_uploads" min="0" required>
+        </div>
+        <div class="flex items-center justify-between">
+            <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline" type="submit">
+                Add Role Upload Limit
+            </button>
+        </div>
+    </form>
+</div>
+
+<div class="mt-8">
+    <a href="{{ url_for('channels') }}" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+        Back to Channels
+    </a>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.14.0/Sortable.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', (event) => {
+    var el = document.getElementById('roleLimitsList');
+    if (el) {
+        var sortable = Sortable.create(el, {
+            animation: 150,
+            ghostClass: 'bg-gray-300',
+            onEnd: function (evt) {
+                var newOrder = Array.from(el.children).map(li => li.dataset.id);
+                
+                fetch('{{ url_for("reorder_channel_settings", channel_id=channel["channel_id"]) }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({new_order: newOrder}),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        console.log('Reordering successful');
+                    } else {
+                        console.error('Reordering failed');
+                    }
+                });
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

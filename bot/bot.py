@@ -5,10 +5,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import datetime
 import os
-import io
 from dotenv import load_dotenv, find_dotenv
 
-# Load environment variables
+# Load environment variables (unchanged)
 dotenv_path = find_dotenv(usecwd=True)
 print(f".env file path: {dotenv_path}")
 
@@ -18,7 +17,7 @@ else:
     print("\nAttempting to load .env file:")
     load_result = load_dotenv(dotenv_path, override=True, verbose=True)
 
-# Debug print
+# Debug print (unchanged)
 token = os.getenv('DISCORD_BOT_TOKEN')
 if token:
     print(f"Token loaded (first 10 chars): {token[:10]}...")
@@ -26,7 +25,7 @@ if token:
 else:
     print("ERROR: No token found in environment variables")
 
-# Bot setup
+# Bot setup (unchanged)
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guild_messages = True
@@ -34,7 +33,7 @@ intents.dm_messages = True
 intents.guild_reactions = True
 intents.dm_reactions = True
 intents.guilds = True
-intents.members = True  # This might require special approval from Discord
+intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Scheduler setup
@@ -42,7 +41,7 @@ scheduler = AsyncIOScheduler()
 
 async def reset_uploads():
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("UPDATE user_uploads SET uploads = 0, last_reset = ?", (datetime.datetime.now().isoformat(),))
+        await db.execute("UPDATE user_channel_uploads SET uploads = 0, last_reset = ?", (datetime.datetime.now().isoformat(),))
         await db.commit()
     print("Daily upload counts reset.")
 
@@ -59,14 +58,29 @@ async def send_private_message(channel, user, content):
     except Exception as e:
         print(f"Unexpected error in send_private_message: {e}")
         await channel.send(f"{user.mention} {content}", delete_after=10)
-        
+
+async def update_channel_names():
+    async with aiosqlite.connect('file_uploads.db') as db:
+        for guild in bot.guilds:
+            for channel in guild.text_channels:
+                await db.execute("""
+                    INSERT OR REPLACE INTO channel_names (channel_id, channel_name)
+                    VALUES (?, ?)
+                """, (channel.id, channel.name))
+        await db.commit()
+    print("Channel names updated.")
 
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute('''CREATE TABLE IF NOT EXISTS user_uploads
-                            (user_id INTEGER PRIMARY KEY, username TEXT, uploads INTEGER, last_reset TEXT)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_channel_uploads
+                            (user_id INTEGER,
+                             channel_id INTEGER,
+                             username TEXT,
+                             uploads INTEGER,
+                             last_reset TEXT,
+                             PRIMARY KEY (user_id, channel_id))''')
         await db.execute('''CREATE TABLE IF NOT EXISTS channel_settings
                             (id INTEGER PRIMARY KEY AUTOINCREMENT,
                              channel_id INTEGER,
@@ -74,10 +88,19 @@ async def on_ready():
                              max_uploads INTEGER,
                              order_index INTEGER)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS global_settings
-                            (id INTEGER PRIMARY KEY CHECK (id = 1), default_max_uploads INTEGER)''')
+                            (id INTEGER PRIMARY KEY CHECK (id = 1),
+                             default_max_uploads INTEGER)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS blocked_channels
                             (channel_id INTEGER PRIMARY KEY)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS channel_names
+                            (channel_id INTEGER PRIMARY KEY,
+                             channel_name TEXT)''')
         await db.commit()
+    
+    # Update channel names immediately and schedule regular updates
+    await update_channel_names()
+    scheduler.add_job(update_channel_names, CronTrigger(hour='*/6'))  # Update every 6 hours
+
 
 @bot.event
 async def on_message(message):
@@ -89,19 +112,16 @@ async def on_message(message):
         user_id = message.author.id
         username = message.author.name
         
-        # Filter attachments to only count .mp3 and .wav files
         counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav'))]
         if not counted_attachments:
-            # If no counted attachments, process the message normally without updating upload count
             return await bot.process_commands(message)
 
         async with aiosqlite.connect('file_uploads.db') as db:
-            # Check if the channel is in the blocked list
+            # Check if the channel is blocked
             async with db.execute("SELECT 1 FROM blocked_channels WHERE channel_id = ?", (channel_id,)) as cursor:
                 is_blocked = await cursor.fetchone()
 
             if is_blocked:
-                # If the channel is blocked, delete the message and notify the user
                 try:
                     await message.delete()
                     await send_private_message(message.channel, message.author, 
@@ -113,9 +133,9 @@ async def on_message(message):
                     print(f"Bot doesn't have permission to delete message {message.id}")
                     return
 
-            # Get all channel settings ordered by priority
-            async with db.execute("SELECT channel_id, role_name, max_uploads FROM channel_settings ORDER BY order_index") as cursor:
-                all_channel_settings = await cursor.fetchall()
+            # Get channel settings ordered by priority
+            async with db.execute("SELECT role_name, max_uploads FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
+                channel_settings = await cursor.fetchall()
 
             # Get global settings
             async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
@@ -124,12 +144,12 @@ async def on_message(message):
             # Get user's roles
             user_roles = [role.name for role in message.author.roles]
 
-            # Determine max_uploads based on user's highest role across all channels
+            # Determine max_uploads based on user's highest priority role
             max_uploads = None
-            for channel_id_setting, role_name, role_max_uploads in all_channel_settings:
+            for role_name, role_max_uploads in channel_settings:
                 if role_name in user_roles:
                     max_uploads = role_max_uploads
-                    break  # Break after finding the highest role the user has
+                    break  # Break after finding the highest priority role the user has
 
             if max_uploads is None:
                 if global_settings:
@@ -139,15 +159,15 @@ async def on_message(message):
                     return
 
             # Check user's current upload count
-            async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
+            async with db.execute("SELECT uploads FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
                 user_uploads = await cursor.fetchone()
 
             if user_uploads:
                 current_uploads = user_uploads[0]
             else:
                 current_uploads = 0
-                await db.execute("INSERT INTO user_uploads (user_id, username, uploads, last_reset) VALUES (?, ?, 0, ?)", 
-                                 (user_id, username, datetime.datetime.now().isoformat()))
+                await db.execute("INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)", 
+                                 (user_id, channel_id, username, datetime.datetime.now().isoformat()))
 
             remaining_uploads = max_uploads - current_uploads
             attachments_count = len(counted_attachments)
@@ -155,27 +175,24 @@ async def on_message(message):
             if remaining_uploads >= attachments_count:
                 # All attachments allowed
                 new_upload_count = current_uploads + attachments_count
-                await db.execute("UPDATE user_uploads SET uploads = ?, username = ? WHERE user_id = ?", 
-                                 (new_upload_count, username, user_id))
+                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ? WHERE user_id = ? AND channel_id = ?", 
+                                 (new_upload_count, username, user_id, channel_id))
                 await db.commit()
-                print(f"Updated upload count for user {username}: {new_upload_count}")
-
-                # await send_private_message(message.channel, message.author, 
-                #     f"Your current .mp3/.wav upload count is now {new_upload_count}/{max_uploads}.")
+                print(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
             else:
                 # Upload limit exceeded
                 try:
                     await message.delete()
                     await send_private_message(message.channel, message.author, 
-                        f"Your upload was deleted as it would exceed your daily limit. "
-                        f"You have {remaining_uploads} uploads remaining out of {max_uploads}. ")
+                        f"Your upload was deleted as it would exceed your daily limit for this channel. "
+                        f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel.")
                 except discord.errors.NotFound:
                     print(f"Message {message.id} was already deleted")
                 except discord.errors.Forbidden:
                     print(f"Bot doesn't have permission to delete message {message.id}")
                     await message.channel.send(
-                        f"{message.author.mention}, your upload exceeds your daily limit. "
-                        f"You have {remaining_uploads} uploads remaining out of {max_uploads}. "
+                        f"{message.author.mention}, your upload exceeds your daily limit for this channel. "
+                        f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel. "
                         f"Please delete this message and upload fewer files.")
 
     await bot.process_commands(message)
@@ -200,13 +217,13 @@ async def set_global_limit(ctx, max_uploads: int):
 @bot.command()
 async def check_uploads(ctx):
     user_id = ctx.author.id
+    channel_id = ctx.channel.id
     async with aiosqlite.connect('file_uploads.db') as db:
-        # Get user's current upload count
-        async with db.execute("SELECT uploads FROM user_uploads WHERE user_id = ?", (user_id,)) as cursor:
+        async with db.execute("SELECT uploads FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
             user_uploads = await cursor.fetchone()
 
     current_uploads = user_uploads[0] if user_uploads else 0
-    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads.")
+    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads in this channel.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')
