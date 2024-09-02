@@ -78,6 +78,7 @@ async def update_channel_names():
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
+
     async with aiosqlite.connect('file_uploads.db') as db:
         await db.execute('''CREATE TABLE IF NOT EXISTS user_channel_uploads
                             (user_id INTEGER,
@@ -104,6 +105,9 @@ async def on_ready():
 
     # Update channel names immediately and schedule regular updates
     await update_channel_names()
+
+    #reset uploads on launch
+    await reset_uploads()
     scheduler.add_job(update_channel_names, CronTrigger(hour='*/6'))  # Update every 6 hours
 
     if not scheduler.running:
