@@ -40,13 +40,18 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 scheduler = AsyncIOScheduler()
 
 async def reset_uploads():
+    current_time = datetime.datetime.now().isoformat()
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("UPDATE user_channel_uploads SET uploads = 0, last_reset = ?", (datetime.datetime.now().isoformat(),))
+        await db.execute("""
+            UPDATE user_channel_uploads
+            SET uploads = 0,
+                last_reset = ?
+            WHERE datetime(last_reset) < datetime('now', '-1 day')
+        """, (current_time,))
         await db.commit()
-    print("Daily upload counts reset.")
+    print(f"Daily upload counts reset at {current_time}")
 
 scheduler.add_job(reset_uploads, CronTrigger(hour=0, minute=0))
-scheduler.start()
 
 async def send_private_message(channel, user, content):
     try:
@@ -96,10 +101,14 @@ async def on_ready():
                             (channel_id INTEGER PRIMARY KEY,
                              channel_name TEXT)''')
         await db.commit()
-    
+
     # Update channel names immediately and schedule regular updates
     await update_channel_names()
     scheduler.add_job(update_channel_names, CronTrigger(hour='*/6'))  # Update every 6 hours
+
+    if not scheduler.running:
+      scheduler.start()
+    print("Scheduler started")
 
 
 @bot.event
@@ -111,7 +120,7 @@ async def on_message(message):
         channel_id = message.channel.id
         user_id = message.author.id
         username = message.author.name
-        
+
         counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav'))]
         if not counted_attachments:
             return await bot.process_commands(message)
@@ -124,7 +133,7 @@ async def on_message(message):
             if is_blocked:
                 try:
                     await message.delete()
-                    await send_private_message(message.channel, message.author, 
+                    await send_private_message(message.channel, message.author,
                         f"Your message was deleted because .mp3/.wav uploads are not allowed in this channel.")
                     return
                 except discord.errors.NotFound:
@@ -166,7 +175,7 @@ async def on_message(message):
                 current_uploads = user_uploads[0]
             else:
                 current_uploads = 0
-                await db.execute("INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)", 
+                await db.execute("INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)",
                                  (user_id, channel_id, username, datetime.datetime.now().isoformat()))
 
             remaining_uploads = max_uploads - current_uploads
@@ -175,7 +184,7 @@ async def on_message(message):
             if remaining_uploads >= attachments_count:
                 # All attachments allowed
                 new_upload_count = current_uploads + attachments_count
-                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ? WHERE user_id = ? AND channel_id = ?", 
+                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ? WHERE user_id = ? AND channel_id = ?",
                                  (new_upload_count, username, user_id, channel_id))
                 await db.commit()
                 print(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
@@ -183,7 +192,7 @@ async def on_message(message):
                 # Upload limit exceeded
                 try:
                     await message.delete()
-                    await send_private_message(message.channel, message.author, 
+                    await send_private_message(message.channel, message.author,
                         f"Your upload was deleted as it would exceed your daily limit for this channel. "
                         f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel.")
                 except discord.errors.NotFound:
