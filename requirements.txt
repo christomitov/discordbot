@@ -4,3 +4,4 @@ Flask
 gunicorn
 python-dotenv
 aiosqlite
+supervisor
