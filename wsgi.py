@@ -22,6 +22,7 @@ def run_app():
         logging.error(f"Error in run_app: {str(e)}", exc_info=True)
         sys.exit(1)
 
+# This is the line Gunicorn is looking for
 application = app
 
 if __name__ == "__main__":
