@@ -1,9 +1,9 @@
-from dashboard import app as application
-from bot import bot, run_bot
+from dashboard.dashboard import app
+from bot.bot import run_bot
 import threading
 
 def run_flask():
-    application.run()
+    app.run()
 
 if __name__ == "__main__":
     bot_thread = threading.Thread(target=run_bot)
