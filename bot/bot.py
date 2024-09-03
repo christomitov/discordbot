@@ -51,7 +51,7 @@ async def reset_uploads():
         await db.commit()
     print(f"Daily upload counts reset at {current_time}")
 
-scheduler.add_job(reset_uploads, CronTrigger(hour=0, minute=0))
+scheduler.add_job(reset_uploads, CronTrigger(minute='*/5'))  # Runs every 5 minutes
 
 async def send_private_message(channel, user, content):
     try:
