@@ -40,18 +40,20 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 scheduler = AsyncIOScheduler()
 
 async def reset_uploads():
-    current_time = datetime.datetime.now().isoformat()
-    async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("""
-            UPDATE user_channel_uploads
-            SET uploads = 0,
-                last_reset = ?
-            WHERE datetime(last_reset) < datetime('now', '-1 day')
-        """, (current_time,))
-        await db.commit()
-    print(f"Daily upload counts reset at {current_time}")
-
-scheduler.add_job(reset_uploads, CronTrigger(minute='*/5'))  # Runs every 5 minutes
+    try:
+        current_time = datetime.datetime.now().isoformat()
+        async with aiosqlite.connect('file_uploads.db') as db:
+            cursor = await db.execute("""
+                UPDATE user_channel_uploads
+                SET uploads = 0,
+                    last_reset = ?
+                WHERE datetime(last_reset) < datetime('now', '-1 day')
+            """, (current_time,))
+            rows_affected = cursor.rowcount
+            await db.commit()
+        print(f"Daily upload counts reset at {current_time}. Rows affected: {rows_affected}")
+    except Exception as e:
+        print(f"Error in reset_uploads: {e}")
 
 async def send_private_message(channel, user, content):
     try:
@@ -103,17 +105,19 @@ async def on_ready():
                              channel_name TEXT)''')
         await db.commit()
 
-    # Update channel names immediately and schedule regular updates
+    # Update channel names immediately
     await update_channel_names()
 
-    #reset uploads on launch
+    # Reset uploads on launch
     await reset_uploads()
-    scheduler.add_job(update_channel_names, CronTrigger(hour='*/6'))  # Update every 6 hours
 
-    if not scheduler.running:
-      scheduler.start()
+    # Start the scheduler
+    scheduler.start()
     print("Scheduler started")
 
+    # Schedule jobs after starting the scheduler
+    scheduler.add_job(reset_uploads, CronTrigger(minute='*/5'))
+    scheduler.add_job(update_channel_names, CronTrigger(hour='*/6'))
 
 @bot.event
 async def on_message(message):
@@ -172,15 +176,18 @@ async def on_message(message):
                     return
 
             # Check user's current upload count
-            async with db.execute("SELECT uploads FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
-                user_uploads = await cursor.fetchone()
+            async with db.execute("SELECT uploads, last_reset FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
+                user_data = await cursor.fetchone()
 
-            if user_uploads:
-                current_uploads = user_uploads[0]
+            current_time = datetime.datetime.now().isoformat()
+            if user_data:
+                current_uploads, last_reset = user_data
+                if datetime.datetime.fromisoformat(last_reset) < datetime.datetime.now() - datetime.timedelta(days=1):
+                    current_uploads = 0
             else:
                 current_uploads = 0
                 await db.execute("INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)",
-                                 (user_id, channel_id, username, datetime.datetime.now().isoformat()))
+                                 (user_id, channel_id, username, current_time))
 
             remaining_uploads = max_uploads - current_uploads
             attachments_count = len(counted_attachments)
@@ -188,8 +195,8 @@ async def on_message(message):
             if remaining_uploads >= attachments_count:
                 # All attachments allowed
                 new_upload_count = current_uploads + attachments_count
-                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ? WHERE user_id = ? AND channel_id = ?",
-                                 (new_upload_count, username, user_id, channel_id))
+                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ?, last_reset = ? WHERE user_id = ? AND channel_id = ?",
+                                 (new_upload_count, username, current_time, user_id, channel_id))
                 await db.commit()
                 print(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
             else:
