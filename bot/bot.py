@@ -129,7 +129,7 @@ async def on_message(message):
         user_id = message.author.id
         username = message.author.name
 
-        counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav'))]
+        counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav', '.flac'))]
         if not counted_attachments:
             return await bot.process_commands(message)
 
