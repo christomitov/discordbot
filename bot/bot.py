@@ -4,6 +4,7 @@ import aiosqlite
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import datetime
+import pytz
 import os
 from dotenv import load_dotenv, find_dotenv
 
@@ -41,6 +42,10 @@ scheduler = AsyncIOScheduler()
 
 async def reset_uploads():
     try:
+        est = pytz.timezone('US/Eastern')
+        current_time_est = datetime.datetime.now(est)
+        is_sunday_midnight = current_time_est.weekday() == 6 and current_time_est.hour == 0 and current_time_est.minute < 5
+
         current_time = datetime.datetime.now().isoformat()
         async with aiosqlite.connect('file_uploads.db') as db:
             # Reset daily channels
@@ -56,18 +61,20 @@ async def reset_uploads():
             """, (current_time,))
             daily_rows_affected = cursor.rowcount
 
-            # Reset weekly channels
-            cursor = await db.execute("""
-                UPDATE user_channel_uploads
-                SET uploads = 0,
-                    last_reset = ?
-                WHERE channel_id IN (
-                    SELECT channel_id FROM channel_settings
-                    WHERE reset_frequency = 'weekly'
-                )
-                AND datetime(last_reset) < datetime('now', '-7 days')
-            """, (current_time,))
-            weekly_rows_affected = cursor.rowcount
+            # Reset weekly channels on Sunday at midnight EST
+            if is_sunday_midnight:
+                cursor = await db.execute("""
+                    UPDATE user_channel_uploads
+                    SET uploads = 0,
+                        last_reset = ?
+                    WHERE channel_id IN (
+                        SELECT channel_id FROM channel_settings
+                        WHERE reset_frequency = 'weekly'
+                    )
+                """, (current_time_est.isoformat(),))
+                weekly_rows_affected = cursor.rowcount
+            else:
+                weekly_rows_affected = 0
 
             await db.commit()
         print(f"Daily upload counts reset at {current_time}. Daily rows affected: {daily_rows_affected}, Weekly rows affected: {weekly_rows_affected}")
