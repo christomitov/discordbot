@@ -43,15 +43,34 @@ async def reset_uploads():
     try:
         current_time = datetime.datetime.now().isoformat()
         async with aiosqlite.connect('file_uploads.db') as db:
+            # Reset daily channels
             cursor = await db.execute("""
                 UPDATE user_channel_uploads
                 SET uploads = 0,
                     last_reset = ?
-                WHERE datetime(last_reset) < datetime('now', '-1 day')
+                WHERE channel_id IN (
+                    SELECT channel_id FROM channel_settings
+                    WHERE reset_frequency = 'daily'
+                )
+                AND datetime(last_reset) < datetime('now', '-1 day')
             """, (current_time,))
-            rows_affected = cursor.rowcount
+            daily_rows_affected = cursor.rowcount
+
+            # Reset weekly channels
+            cursor = await db.execute("""
+                UPDATE user_channel_uploads
+                SET uploads = 0,
+                    last_reset = ?
+                WHERE channel_id IN (
+                    SELECT channel_id FROM channel_settings
+                    WHERE reset_frequency = 'weekly'
+                )
+                AND datetime(last_reset) < datetime('now', '-7 days')
+            """, (current_time,))
+            weekly_rows_affected = cursor.rowcount
+
             await db.commit()
-        print(f"Daily upload counts reset at {current_time}. Rows affected: {rows_affected}")
+        print(f"Daily upload counts reset at {current_time}. Daily rows affected: {daily_rows_affected}, Weekly rows affected: {weekly_rows_affected}")
     except Exception as e:
         print(f"Error in reset_uploads: {e}")
 
@@ -103,6 +122,7 @@ async def on_ready():
         await db.execute('''CREATE TABLE IF NOT EXISTS channel_names
                             (channel_id INTEGER PRIMARY KEY,
                              channel_name TEXT)''')
+        await db.execute('''ALTER TABLE channel_settings ADD COLUMN reset_frequency TEXT DEFAULT 'daily' ''')
         await db.commit()
 
     # Update channel names immediately
@@ -151,7 +171,7 @@ async def on_message(message):
                     return
 
             # Get channel settings ordered by priority
-            async with db.execute("SELECT role_name, max_uploads FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
+            async with db.execute("SELECT role_name, max_uploads, reset_frequency FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
                 channel_settings = await cursor.fetchall()
 
             # Get global settings

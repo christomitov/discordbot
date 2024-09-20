@@ -7,17 +7,29 @@
 
 <div class="mb-8">
     <h2 class="text-2xl font-bold mb-4">Channel Status</h2>
-    <form action="{{ url_for('toggle_channel_block', channel_id=channel['channel_id']) }}" method="post" class="inline">
-        <button type="submit" class="{% if is_blocked %}bg-green-500 hover:bg-green-700{% else %}bg-red-500 hover:bg-red-700{% endif %} text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-            {% if is_blocked %}Unblock Channel{% else %}Block Channel{% endif %}
-        </button>
-    </form>
+    <div class="flex items-start space-x-20">
+        <form action="{{ url_for('toggle_channel_block', channel_id=channel['channel_id']) }}" method="post" class="inline">
+            <button type="submit" class="{% if is_blocked %}bg-green-500 hover:bg-green-700{% else %}bg-red-500 hover:bg-red-700{% endif %} text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                {% if is_blocked %}Unblock Channel{% else %}Block Channel{% endif %}
+            </button>
+        </form>
+        <form action="{{ url_for('update_channel_reset_frequency', channel_id=channel['channel_id']) }}" method="post" class="inline">
+            <select name="reset_frequency" class="shadow border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                <option value="daily" {% if channel['reset_frequency'] == 'daily' %}selected{% endif %}>Daily Reset</option>
+                <option value="weekly" {% if channel['reset_frequency'] == 'weekly' %}selected{% endif %}>Weekly Reset</option>
+            </select>
+            <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline ml-2">
+                Update Reset Frequency
+            </button>
+        </form>
+    </div>
     <p class="mt-2 text-gray-600">
         {% if is_blocked %}
             This channel is currently blocked. No .mp3 or .wav uploads are allowed.
         {% else %}
             This channel is currently active. Uploads are allowed according to role limits.
         {% endif %}
+        Upload limits are reset {{ channel['reset_frequency'] }}.
     </p>
 </div>
 
@@ -83,7 +95,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
             ghostClass: 'bg-gray-300',
             onEnd: function (evt) {
                 var newOrder = Array.from(el.children).map(li => li.dataset.id);
-                
+
                 fetch('{{ url_for("reorder_channel_settings", channel_id=channel["channel_id"]) }}', {
                     method: 'POST',
                     headers: {

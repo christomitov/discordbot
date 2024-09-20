@@ -22,7 +22,7 @@ def index():
 def channels():
     conn = get_db_connection()
     channels = conn.execute("""
-        SELECT cn.channel_id, cn.channel_name, 
+        SELECT cn.channel_id, cn.channel_name,
                COUNT(DISTINCT cs.role_name) as role_count,
                CASE WHEN bc.channel_id IS NOT NULL THEN 1 ELSE 0 END as is_blocked
         FROM channel_names cn
@@ -37,7 +37,7 @@ def channels():
 @app.route('/channel/<int:channel_id>')
 def channel_settings(channel_id):
     conn = get_db_connection()
-    channel = conn.execute("SELECT * FROM channel_names WHERE channel_id = ?", (channel_id,)).fetchone()
+    channel = conn.execute("SELECT cn.*, COALESCE(cs.reset_frequency, 'daily') as reset_frequency FROM channel_names cn LEFT JOIN channel_settings cs ON cn.channel_id = cs.channel_id WHERE cn.channel_id = ? LIMIT 1", (channel_id,)).fetchone()
     settings = conn.execute("SELECT * FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)).fetchall()
     is_blocked = conn.execute("SELECT 1 FROM blocked_channels WHERE channel_id = ?", (channel_id,)).fetchone() is not None
     conn.close()
@@ -47,7 +47,6 @@ def channel_settings(channel_id):
 def update_channel_settings(channel_id):
     role_name = request.form['role_name']
     max_uploads = request.form['max_uploads']
-
     conn = get_db_connection()
     max_order = conn.execute("SELECT MAX(order_index) FROM channel_settings WHERE channel_id = ?", (channel_id,)).fetchone()[0]
     new_order = (max_order or 0) + 1
@@ -55,8 +54,19 @@ def update_channel_settings(channel_id):
                  (channel_id, role_name, max_uploads, new_order))
     conn.commit()
     conn.close()
+    flash('Role upload limit added successfully!', 'success')
+    return redirect(url_for('channel_settings', channel_id=channel_id))
 
-    flash('Channel settings updated successfully!', 'success')
+@app.route('/update_channel_reset_frequency/<int:channel_id>', methods=['POST'])
+def update_channel_reset_frequency(channel_id):
+    reset_frequency = request.form['reset_frequency']
+    conn = get_db_connection()
+    conn.execute("UPDATE channel_settings SET reset_frequency = ? WHERE channel_id = ?", (reset_frequency, channel_id))
+    if conn.execute("SELECT changes()").fetchone()[0] == 0:
+        conn.execute("INSERT INTO channel_settings (channel_id, reset_frequency) VALUES (?, ?)", (channel_id, reset_frequency))
+    conn.commit()
+    conn.close()
+    flash('Channel reset frequency updated successfully!', 'success')
     return redirect(url_for('channel_settings', channel_id=channel_id))
 
 @app.route('/reorder_channel_settings/<int:channel_id>', methods=['POST'])
@@ -83,14 +93,14 @@ def delete_channel_settings(channel_id, setting_id):
 def toggle_channel_block(channel_id):
     conn = get_db_connection()
     is_blocked = conn.execute("SELECT 1 FROM blocked_channels WHERE channel_id = ?", (channel_id,)).fetchone() is not None
-    
+
     if is_blocked:
         conn.execute("DELETE FROM blocked_channels WHERE channel_id = ?", (channel_id,))
         flash('Channel unblocked successfully!', 'success')
     else:
         conn.execute("INSERT INTO blocked_channels (channel_id) VALUES (?)", (channel_id,))
         flash('Channel blocked successfully!', 'success')
-    
+
     conn.commit()
     conn.close()
     return redirect(url_for('channel_settings', channel_id=channel_id))
@@ -112,7 +122,7 @@ def update_global_settings():
 def users():
     conn = get_db_connection()
     users = conn.execute("""
-        SELECT u.user_id, u.username, u.channel_id, u.uploads, u.last_reset, 
+        SELECT u.user_id, u.username, u.channel_id, u.uploads, u.last_reset,
                COALESCE(cn.channel_name, 'Unknown Channel') as channel_name
         FROM user_channel_uploads u
         LEFT JOIN channel_names cn ON u.channel_id = cn.channel_id
@@ -125,13 +135,13 @@ def users():
 def reset_user(user_id, channel_id):
     conn = get_db_connection()
     conn.execute("""
-        UPDATE user_channel_uploads 
-        SET uploads = 0, last_reset = CURRENT_TIMESTAMP 
+        UPDATE user_channel_uploads
+        SET uploads = 0, last_reset = CURRENT_TIMESTAMP
         WHERE user_id = ? AND channel_id = ?
     """, (user_id, channel_id))
     conn.commit()
     conn.close()
-    
+
     flash(f'User {user_id} has been reset for channel {channel_id}.', 'success')
     return redirect(url_for('users'))
 
