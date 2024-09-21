@@ -129,7 +129,19 @@ async def on_ready():
         await db.execute('''CREATE TABLE IF NOT EXISTS channel_names
                             (channel_id INTEGER PRIMARY KEY,
                              channel_name TEXT)''')
-        await db.execute('''ALTER TABLE channel_settings ADD COLUMN reset_frequency TEXT DEFAULT 'daily' ''')
+        # Check if reset_frequency column exists in channel_settings table
+        cursor = await db.execute("PRAGMA table_info(channel_settings)")
+        columns = await cursor.fetchall()
+        column_names = [column[1] for column in columns]
+
+        if 'reset_frequency' not in column_names:
+            # Add reset_frequency column if it doesn't exist
+            await db.execute('''ALTER TABLE channel_settings
+                                ADD COLUMN reset_frequency TEXT DEFAULT 'daily' ''')
+            print("Added reset_frequency column to channel_settings table")
+        else:
+            print("reset_frequency column already exists in channel_settings table")
+
         await db.commit()
 
     # Update channel names immediately
