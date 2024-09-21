@@ -256,6 +256,7 @@ async def on_message(message):
                         f"{message.author.mention}, your upload exceeds your {reset_frequency} limit for this channel. "
                         f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel. "
                         f"Please delete this message and upload fewer files.")
+                return  # Stop processing this message
 
     await bot.process_commands(message)
 
