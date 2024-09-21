@@ -220,16 +220,7 @@ async def on_message(message):
             async with db.execute("SELECT uploads, last_reset FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
                 user_data = await cursor.fetchone()
 
-            current_time = datetime.datetime.now(pytz.utc)
-            if user_data:
-                current_uploads, last_reset = user_data
-                last_reset = pytz.utc.localize(datetime.datetime.fromisoformat(last_reset))
-                if reset_frequency == 'daily' and (current_time - last_reset) > datetime.timedelta(days=1):
-                    current_uploads = 0
-                elif reset_frequency == 'weekly' and (current_time - last_reset) > datetime.timedelta(days=7):
-                    current_uploads = 0
-            else:
-                current_uploads = 0
+            current_uploads = user_data[0] if user_data else 0
 
             remaining_uploads = max_uploads - current_uploads
             attachments_count = len(counted_attachments)
