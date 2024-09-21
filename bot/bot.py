@@ -181,7 +181,7 @@ async def on_message(message):
                 try:
                     await message.delete()
                     await send_private_message(message.channel, message.author,
-                        f"Your message was deleted because .mp3/.wav uploads are not allowed in this channel.")
+                        f"Your message was deleted because audio uploads are not allowed in this channel.")
                     return
                 except discord.errors.NotFound:
                     print(f"Message {message.id} was already deleted")
@@ -189,7 +189,7 @@ async def on_message(message):
                     print(f"Bot doesn't have permission to delete message {message.id}")
                     return
 
-            # Get channel settings ordered by priority
+            # Get channel settings
             async with db.execute("SELECT role_name, max_uploads, reset_frequency FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
                 channel_settings = await cursor.fetchall()
 
@@ -200,11 +200,13 @@ async def on_message(message):
             # Get user's roles
             user_roles = [role.name for role in message.author.roles]
 
-            # Determine max_uploads based on user's highest priority role
+            # Determine max_uploads and reset_frequency based on user's highest priority role
             max_uploads = None
-            for role_name, role_max_uploads in channel_settings:
+            reset_frequency = 'daily'  # Default to daily if not set
+            for role_name, role_max_uploads, role_reset_frequency in channel_settings:
                 if role_name in user_roles:
                     max_uploads = role_max_uploads
+                    reset_frequency = role_reset_frequency
                     break  # Break after finding the highest priority role the user has
 
             if max_uploads is None:
@@ -218,15 +220,16 @@ async def on_message(message):
             async with db.execute("SELECT uploads, last_reset FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
                 user_data = await cursor.fetchone()
 
-            current_time = datetime.datetime.now().isoformat()
+            current_time = datetime.datetime.now(pytz.utc)
             if user_data:
                 current_uploads, last_reset = user_data
-                if datetime.datetime.fromisoformat(last_reset) < datetime.datetime.now() - datetime.timedelta(days=1):
+                last_reset = pytz.utc.localize(datetime.datetime.fromisoformat(last_reset))
+                if reset_frequency == 'daily' and (current_time - last_reset) > datetime.timedelta(days=1):
+                    current_uploads = 0
+                elif reset_frequency == 'weekly' and (current_time - last_reset) > datetime.timedelta(days=7):
                     current_uploads = 0
             else:
                 current_uploads = 0
-                await db.execute("INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)",
-                                 (user_id, channel_id, username, current_time))
 
             remaining_uploads = max_uploads - current_uploads
             attachments_count = len(counted_attachments)
@@ -234,8 +237,8 @@ async def on_message(message):
             if remaining_uploads >= attachments_count:
                 # All attachments allowed
                 new_upload_count = current_uploads + attachments_count
-                await db.execute("UPDATE user_channel_uploads SET uploads = ?, username = ?, last_reset = ? WHERE user_id = ? AND channel_id = ?",
-                                 (new_upload_count, username, current_time, user_id, channel_id))
+                await db.execute("INSERT OR REPLACE INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, ?, ?)",
+                                 (user_id, channel_id, username, new_upload_count, current_time.isoformat()))
                 await db.commit()
                 print(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
             else:
@@ -243,14 +246,14 @@ async def on_message(message):
                 try:
                     await message.delete()
                     await send_private_message(message.channel, message.author,
-                        f"Your upload was deleted as it would exceed your daily limit for this channel. "
+                        f"Your upload was deleted as it would exceed your {reset_frequency} limit for this channel. "
                         f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel.")
                 except discord.errors.NotFound:
                     print(f"Message {message.id} was already deleted")
                 except discord.errors.Forbidden:
                     print(f"Bot doesn't have permission to delete message {message.id}")
                     await message.channel.send(
-                        f"{message.author.mention}, your upload exceeds your daily limit for this channel. "
+                        f"{message.author.mention}, your upload exceeds your {reset_frequency} limit for this channel. "
                         f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel. "
                         f"Please delete this message and upload fewer files.")
 
