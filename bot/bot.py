@@ -298,8 +298,9 @@ async def set_global_limit(ctx, max_uploads: int):
 
 @bot.command()
 async def check_uploads(ctx):
+    # For forum threads, get the parent channel ID
+    channel_id = ctx.channel.parent_id if isinstance(ctx.channel, discord.Thread) else ctx.channel.id
     user_id = ctx.author.id
-    channel_id = ctx.channel.id
     async with aiosqlite.connect('file_uploads.db') as db:
         async with db.execute("SELECT uploads FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
             user_uploads = await cursor.fetchone()
