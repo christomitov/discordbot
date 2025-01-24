@@ -255,6 +255,7 @@ async def on_message(message):
             if remaining_uploads >= attachments_count:
                 # All attachments allowed
                 new_upload_count = current_uploads + attachments_count
+                current_time = datetime.datetime.now()
                 await db.execute("INSERT OR REPLACE INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, ?, ?)",
                                  (user_id, channel_id, username, new_upload_count, current_time.isoformat()))
                 await db.commit()
