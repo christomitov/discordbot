@@ -267,11 +267,24 @@ async def on_message(message):
             if remaining_uploads >= len(counted_attachments):
                 # All attachments allowed
                 new_upload_count = current_uploads + len(counted_attachments)
+                if new_upload_count > max_uploads:
+                    try:
+                        await message.delete()
+                        await send_private_message(message.channel, message.author,
+                            f"Your upload was deleted as it would exceed your {reset_frequency} limit for this channel. "
+                            f"You have {remaining_uploads} uploads remaining out of {max_uploads} in this channel.")
+                        return
+                    except discord.errors.NotFound:
+                        print(f"Message {message.id} was already deleted")
+                    except discord.errors.Forbidden:
+                        print(f"Bot doesn't have permission to delete message {message.id}")
+                        return
+                
                 current_time = datetime.datetime.now()
                 await db.execute("INSERT OR REPLACE INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, ?, ?)",
                                  (user_id, channel_id, username, new_upload_count, current_time.isoformat()))
                 await db.commit()
-                print(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
+                logging.info(f"Updated upload count for user {username} in channel {channel_id}: {new_upload_count}")
             else:
                 # Upload limit exceeded
                 try:
