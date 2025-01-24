@@ -237,6 +237,7 @@ async def on_message(message):
 
             # Get user's roles
             user_roles = [role.name for role in message.author.roles]
+            logging.info(f"User roles: {user_roles}")
 
             # Determine max_uploads and reset_frequency based on user's highest priority role
             max_uploads = None
@@ -247,12 +248,17 @@ async def on_message(message):
                     reset_frequency = role_reset_frequency
                     break  # Break after finding the highest priority role the user has
 
-            if max_uploads is None:
-                if global_settings:
-                    max_uploads = global_settings[0]
-                else:
-                    # No settings found, allow unlimited uploads
+            if max_uploads is None:  # User has none of the configured roles
+                try:
+                    await message.delete()
+                    await send_private_message(message.channel, message.author,
+                        "Your upload was deleted because you don't have the required role to upload in this channel.")
                     return
+                except discord.errors.NotFound:
+                    logging.info(f"Message {message.id} was already deleted")
+                except discord.errors.Forbidden:
+                    logging.info(f"Bot doesn't have permission to delete message {message.id}")
+                return
 
             # Get user's current upload count
             async with db.execute("SELECT uploads, last_reset FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
