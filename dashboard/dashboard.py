@@ -22,14 +22,14 @@ def index():
 def channels():
     conn = get_db_connection()
     channels = conn.execute("""
-        SELECT cn.channel_id, cn.channel_name,
+        SELECT cn.channel_id, cn.channel_name, cn.channel_type,
                COUNT(DISTINCT cs.role_name) as role_count,
                CASE WHEN bc.channel_id IS NOT NULL THEN 1 ELSE 0 END as is_blocked
         FROM channel_names cn
         LEFT JOIN channel_settings cs ON cn.channel_id = cs.channel_id
         LEFT JOIN blocked_channels bc ON cn.channel_id = bc.channel_id
         GROUP BY cn.channel_id
-        ORDER BY cn.channel_name
+        ORDER BY cn.channel_type, cn.channel_name
     """).fetchall()
     conn.close()
     return render_template('channels.html', channels=channels, active_page='channels')

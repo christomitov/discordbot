@@ -25,6 +25,7 @@
     <thead>
         <tr class="bg-gray-200 text-gray-600 uppercase text-sm leading-normal">
             <th class="py-3 px-6 text-left">Channel Name</th>
+            <th class="py-3 px-6 text-left">Type</th>
             <th class="py-3 px-6 text-left">Channel ID</th>
             <th class="py-3 px-6 text-left">Role Settings</th>
             <th class="py-3 px-6 text-left">Status</th>
@@ -35,6 +36,13 @@
         {% for channel in channels %}
         <tr class="border-b border-gray-200 hover:bg-gray-100">
             <td class="py-3 px-6 text-left">{{ channel['channel_name'] }}</td>
+            <td class="py-3 px-6 text-left">
+                {% if channel['channel_type'] == 'forum' %}
+                    <span class="bg-purple-500 text-white py-1 px-3 rounded-full text-xs">Forum</span>
+                {% else %}
+                    <span class="bg-blue-500 text-white py-1 px-3 rounded-full text-xs">Text</span>
+                {% endif %}
+            </td>
             <td class="py-3 px-6 text-left">{{ channel['channel_id'] }}</td>
             <td class="py-3 px-6 text-left">{{ channel['role_count'] }} role(s)</td>
             <td class="py-3 px-6 text-left">

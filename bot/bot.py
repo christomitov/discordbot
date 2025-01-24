@@ -94,12 +94,23 @@ async def send_private_message(channel, user, content):
 
 async def update_channel_names():
     async with aiosqlite.connect('file_uploads.db') as db:
+        # First, add channel_type column if it doesn't exist
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS channel_names
+            (channel_id INTEGER PRIMARY KEY,
+             channel_name TEXT,
+             channel_type TEXT)
+        """)
+        
         for guild in bot.guilds:
-            for channel in guild.text_channels:
+            # Get both text channels and forum channels
+            channels = guild.text_channels + guild.forums
+            for channel in channels:
+                channel_type = 'forum' if isinstance(channel, discord.ForumChannel) else 'text'
                 await db.execute("""
-                    INSERT OR REPLACE INTO channel_names (channel_id, channel_name)
-                    VALUES (?, ?)
-                """, (channel.id, channel.name))
+                    INSERT OR REPLACE INTO channel_names (channel_id, channel_name, channel_type)
+                    VALUES (?, ?, ?)
+                """, (channel.id, channel.name, channel_type))
         await db.commit()
     print("Channel names updated.")
 
@@ -128,7 +139,8 @@ async def on_ready():
                             (channel_id INTEGER PRIMARY KEY)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS channel_names
                             (channel_id INTEGER PRIMARY KEY,
-                             channel_name TEXT)''')
+                             channel_name TEXT,
+                             channel_type TEXT)''')
         # Check if reset_frequency column exists in channel_settings table
         cursor = await db.execute("PRAGMA table_info(channel_settings)")
         columns = await cursor.fetchall()
@@ -142,6 +154,16 @@ async def on_ready():
         else:
             print("reset_frequency column already exists in channel_settings table")
 
+        # Add channel_type column to channel_names if it doesn't exist
+        cursor = await db.execute("PRAGMA table_info(channel_names)")
+        columns = await cursor.fetchall()
+        column_names = [column[1] for column in columns]
+        
+        if 'channel_type' not in column_names:
+            await db.execute('''ALTER TABLE channel_names
+                               ADD COLUMN channel_type TEXT DEFAULT 'text' ''')
+            print("Added channel_type column to channel_names table")
+        
         await db.commit()
 
     # Update channel names immediately
@@ -163,8 +185,13 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Check if the channel is either a text channel or a forum thread
+    if not isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+        return await bot.process_commands(message)
+
     if message.attachments:
-        channel_id = message.channel.id
+        # For forum threads, get the parent channel ID
+        channel_id = message.channel.parent_id if isinstance(message.channel, discord.Thread) else message.channel.id
         user_id = message.author.id
         username = message.author.name
 
