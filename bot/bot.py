@@ -192,11 +192,14 @@ async def on_message(message):
     if message.attachments:
         # For forum threads, get the parent channel ID
         channel_id = message.channel.parent_id if isinstance(message.channel, discord.Thread) else message.channel.id
+        print(f"Processing upload - Channel type: {type(message.channel)}, Channel ID: {channel_id}")
+        
         user_id = message.author.id
         username = message.author.name
 
         counted_attachments = [att for att in message.attachments if att.filename.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg'))]
         if not counted_attachments:
+            print("No audio attachments found, skipping")
             return await bot.process_commands(message)
 
         async with aiosqlite.connect('file_uploads.db') as db:
@@ -219,6 +222,7 @@ async def on_message(message):
             # Get channel settings
             async with db.execute("SELECT role_name, max_uploads, reset_frequency FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
                 channel_settings = await cursor.fetchall()
+                print(f"Found channel settings: {channel_settings}")
 
             # Get global settings
             async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
@@ -243,18 +247,19 @@ async def on_message(message):
                     # No settings found, allow unlimited uploads
                     return
 
-            # Check user's current upload count
+            # Get user's current upload count
             async with db.execute("SELECT uploads, last_reset FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
                 user_data = await cursor.fetchone()
+                print(f"Current user data: {user_data}")
 
             current_uploads = user_data[0] if user_data else 0
+            print(f"Current uploads: {current_uploads}, Attachments to add: {len(counted_attachments)}")
 
             remaining_uploads = max_uploads - current_uploads
-            attachments_count = len(counted_attachments)
 
-            if remaining_uploads >= attachments_count:
+            if remaining_uploads >= len(counted_attachments):
                 # All attachments allowed
-                new_upload_count = current_uploads + attachments_count
+                new_upload_count = current_uploads + len(counted_attachments)
                 current_time = datetime.datetime.now()
                 await db.execute("INSERT OR REPLACE INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, ?, ?)",
                                  (user_id, channel_id, username, new_upload_count, current_time.isoformat()))
