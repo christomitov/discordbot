@@ -8,6 +8,7 @@ import pytz
 import os
 from dotenv import load_dotenv, find_dotenv
 import logging
+import json
 
 # Set up logging
 logging.basicConfig(
@@ -148,7 +149,8 @@ async def on_ready():
                              channel_id INTEGER,
                              role_name TEXT,
                              max_uploads INTEGER,
-                             order_index INTEGER)''')
+                             order_index INTEGER,
+                             reset_frequency TEXT)''')
         await db.execute('''CREATE TABLE IF NOT EXISTS global_settings
                             (id INTEGER PRIMARY KEY CHECK (id = 1),
                              default_max_uploads INTEGER)''')
@@ -243,9 +245,10 @@ async def on_message(message):
                 channel_settings = await cursor.fetchall()
                 logging.info(f"Found channel settings: {channel_settings}")
 
-            # Get global settings
-            async with db.execute("SELECT default_max_uploads FROM global_settings WHERE id = 1") as cursor:
-                global_settings = await cursor.fetchone()
+            # If no channel settings exist, allow unlimited uploads
+            if not channel_settings:
+                logging.info(f"No role limits set for channel {channel_id}, allowing unlimited uploads")
+                return await bot.process_commands(message)
 
             # Get user's roles
             user_roles = [role.name for role in message.author.roles]
@@ -260,7 +263,7 @@ async def on_message(message):
                     reset_frequency = role_reset_frequency
                     break  # Break after finding the highest priority role the user has
 
-            if max_uploads is None:  # User has none of the configured roles
+            if max_uploads is None:  # User has none of the configured roles but roles are required
                 try:
                     await message.delete()
                     await send_private_message(message.channel, message.author,
@@ -308,7 +311,9 @@ async def on_message(message):
                         print(f"Message {message.id} was already deleted")
                     except discord.errors.Forbidden:
                         print(f"Bot doesn't have permission to delete message {message.id}")
-                        return
+                    except Exception as e:
+                        print(f"Unexpected error in on_message: {e}")
+                    return
                 
                 est = pytz.timezone('US/Eastern')
                 current_time = datetime.datetime.now(est)
@@ -337,12 +342,57 @@ async def on_message(message):
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int, order_index: int):
+async def set_channel_settings(ctx, channel_id: int, role_name: str, max_uploads: int, order_index: int, reset_frequency: str = 'daily'):
+    if reset_frequency not in ['daily', 'weekly']:
+        await ctx.send("Error: reset_frequency must be either 'daily' or 'weekly'")
+        return
+        
     async with aiosqlite.connect('file_uploads.db') as db:
-        await db.execute("INSERT OR REPLACE INTO channel_settings (channel_id, role_name, max_uploads, order_index) VALUES (?, ?, ?, ?)",
-                         (channel_id, role_name, max_uploads, order_index))
+        await db.execute("""
+            INSERT OR REPLACE INTO channel_settings 
+            (channel_id, role_name, max_uploads, order_index, reset_frequency) 
+            VALUES (?, ?, ?, ?, ?)
+        """, (channel_id, role_name, max_uploads, order_index, reset_frequency))
         await db.commit()
-    await ctx.send(f"Channel settings updated for channel {channel_id}")
+    await ctx.send(f"Channel settings updated for channel {channel_id} with {reset_frequency} reset")
+
+@bot.command()
+async def check_uploads(ctx):
+    # For forum threads, get the parent channel ID
+    channel_id = ctx.channel.parent_id if isinstance(ctx.channel, discord.Thread) else ctx.channel.id
+    user_id = ctx.author.id
+    
+    async with aiosqlite.connect('file_uploads.db') as db:
+        # Check if channel has role limits
+        async with db.execute("SELECT 1 FROM channel_settings WHERE channel_id = ?", (channel_id,)) as cursor:
+            has_role_limits = await cursor.fetchone() is not None
+            
+        if not has_role_limits:
+            await ctx.send(f"{ctx.author.mention}, this channel has no upload limits!")
+            return
+            
+        async with db.execute("""
+            SELECT u.uploads, cs.max_uploads, cs.reset_frequency 
+            FROM user_channel_uploads u 
+            LEFT JOIN channel_settings cs ON cs.channel_id = u.channel_id 
+            WHERE u.user_id = ? AND u.channel_id = ? AND cs.role_name IN (
+                SELECT name FROM json_each(?)
+            )
+            ORDER BY cs.order_index 
+            LIMIT 1
+        """, (user_id, channel_id, json.dumps([role.name for role in ctx.author.roles]))) as cursor:
+            result = await cursor.fetchone()
+            
+        if result:
+            current_uploads, max_uploads, reset_frequency = result
+            await ctx.send(
+                f"{ctx.author.mention}, you have used {current_uploads} out of {max_uploads} uploads "
+                f"in this channel ({reset_frequency} reset)"
+            )
+        else:
+            await ctx.send(
+                f"{ctx.author.mention}, you don't have any roles with upload permissions in this channel"
+            )
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -351,18 +401,6 @@ async def set_global_limit(ctx, max_uploads: int):
         await db.execute("INSERT OR REPLACE INTO global_settings (id, default_max_uploads) VALUES (1, ?)", (max_uploads,))
         await db.commit()
     await ctx.send(f"Global upload limit set to {max_uploads}")
-
-@bot.command()
-async def check_uploads(ctx):
-    # For forum threads, get the parent channel ID
-    channel_id = ctx.channel.parent_id if isinstance(ctx.channel, discord.Thread) else ctx.channel.id
-    user_id = ctx.author.id
-    async with aiosqlite.connect('file_uploads.db') as db:
-        async with db.execute("SELECT uploads FROM user_channel_uploads WHERE user_id = ? AND channel_id = ?", (user_id, channel_id)) as cursor:
-            user_uploads = await cursor.fetchone()
-
-    current_uploads = user_uploads[0] if user_uploads else 0
-    await ctx.send(f"{ctx.author.mention}, you have used {current_uploads} uploads in this channel.")
 
 def run_bot():
     token = os.getenv('DISCORD_BOT_TOKEN')
