@@ -254,15 +254,16 @@ async def on_message(message):
             user_roles = [role.name for role in message.author.roles]
             logging.info(f"User roles: {user_roles}")
 
-            # Determine max_uploads and reset_frequency based on user's highest priority role
+            # Determine max_uploads and reset_frequency based on user's highest allowed uploads
             max_uploads = None
             reset_frequency = 'daily'  # Default to daily if not set
             for role_name, role_max_uploads, role_reset_frequency in channel_settings:
                 if role_name in user_roles:
-                    max_uploads = role_max_uploads
-                    reset_frequency = role_reset_frequency
-                    break  # Break after finding the highest priority role the user has
-
+                    # Update max_uploads if this role has a higher limit or if no limit was set yet
+                    if max_uploads is None or role_max_uploads > max_uploads:
+                        max_uploads = role_max_uploads
+                        reset_frequency = role_reset_frequency
+            
             if max_uploads is None:  # User has none of the configured roles but roles are required
                 try:
                     await message.delete()
