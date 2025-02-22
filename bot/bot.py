@@ -51,9 +51,8 @@ async def reset_uploads():
     try:
         est = pytz.timezone('US/Eastern')
         current_time_est = datetime.datetime.now(est)
-        is_sunday_midnight = current_time_est.weekday() == 6 and current_time_est.hour == 0 and current_time_est.minute < 5
-
-        current_time = datetime.datetime.now().isoformat()
+        current_time = current_time_est.isoformat()
+        
         async with aiosqlite.connect('file_uploads.db') as db:
             # Reset daily channels
             cursor = await db.execute("""
@@ -64,29 +63,40 @@ async def reset_uploads():
                     SELECT channel_id FROM channel_settings
                     WHERE reset_frequency = 'daily'
                 )
-                AND datetime(last_reset) < datetime('now', '-1 day')
-            """, (current_time,))
+                AND datetime(last_reset) < datetime(?, '-1 day')
+            """, (current_time, current_time))
             daily_rows_affected = cursor.rowcount
 
-            # Reset weekly channels on Sunday at midnight EST
-            if is_sunday_midnight:
-                cursor = await db.execute("""
-                    UPDATE user_channel_uploads
-                    SET uploads = 0,
-                        last_reset = ?
-                    WHERE channel_id IN (
-                        SELECT channel_id FROM channel_settings
-                        WHERE reset_frequency = 'weekly'
+            # Reset weekly channels - check if it's been a week since last reset
+            cursor = await db.execute("""
+                UPDATE user_channel_uploads
+                SET uploads = 0,
+                    last_reset = ?
+                WHERE channel_id IN (
+                    SELECT channel_id FROM channel_settings
+                    WHERE reset_frequency = 'weekly'
+                )
+                AND (
+                    datetime(last_reset) < datetime(?, '-7 days')
+                    OR (
+                        ? = '0' -- Sunday
+                        AND substr(?, 12, 2) = '00' -- Midnight hour
+                        AND datetime(last_reset) < datetime(?, '-6 days')
                     )
-                """, (current_time_est.isoformat(),))
-                weekly_rows_affected = cursor.rowcount
-            else:
-                weekly_rows_affected = 0
+                )
+            """, (current_time, current_time, str(current_time_est.weekday()), current_time, current_time))
+            weekly_rows_affected = cursor.rowcount
 
             await db.commit()
-        print(f"Daily upload counts reset at {current_time}. Daily rows affected: {daily_rows_affected}, Weekly rows affected: {weekly_rows_affected}")
+            
+        logging.info(
+            f"Upload counts reset at {current_time} EST. "
+            f"Daily rows affected: {daily_rows_affected}, "
+            f"Weekly rows affected: {weekly_rows_affected}"
+        )
     except Exception as e:
-        print(f"Error in reset_uploads: {e}")
+        logging.error(f"Error in reset_uploads: {str(e)}")
+        raise
 
 async def send_private_message(channel, user, content):
     try:
@@ -224,7 +234,9 @@ async def on_message(message):
                     print(f"Message {message.id} was already deleted")
                 except discord.errors.Forbidden:
                     print(f"Bot doesn't have permission to delete message {message.id}")
-                    return
+                except Exception as e:
+                    print(f"Unexpected error in on_message: {e}")
+                return
 
             # Get channel settings
             async with db.execute("SELECT role_name, max_uploads, reset_frequency FROM channel_settings WHERE channel_id = ? ORDER BY order_index", (channel_id,)) as cursor:
@@ -265,6 +277,18 @@ async def on_message(message):
                 user_data = await cursor.fetchone()
                 logging.info(f"Current user data: {user_data}")
 
+            if user_data is None:
+                # Create initial entry for new user with 0 uploads
+                est = pytz.timezone('US/Eastern')
+                current_time = datetime.datetime.now(est)
+                await db.execute(
+                    "INSERT INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, 0, ?)",
+                    (user_id, channel_id, username, current_time.isoformat())
+                )
+                await db.commit()
+                user_data = (0, current_time.isoformat())
+                logging.info(f"Created initial entry for user {username} in channel {channel_id}")
+
             current_uploads = user_data[0] if user_data else 0
             logging.info(f"Current uploads: {current_uploads}, Attachments to add: {len(counted_attachments)}")
 
@@ -286,7 +310,8 @@ async def on_message(message):
                         print(f"Bot doesn't have permission to delete message {message.id}")
                         return
                 
-                current_time = datetime.datetime.now()
+                est = pytz.timezone('US/Eastern')
+                current_time = datetime.datetime.now(est)
                 await db.execute("INSERT OR REPLACE INTO user_channel_uploads (user_id, channel_id, username, uploads, last_reset) VALUES (?, ?, ?, ?, ?)",
                                  (user_id, channel_id, username, new_upload_count, current_time.isoformat()))
                 await db.commit()
